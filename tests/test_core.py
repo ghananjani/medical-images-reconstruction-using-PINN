@@ -58,7 +58,8 @@ def test_ct_sart_uses_native_geometry():
 
 
 def test_mri_complex_measurement_consistency_before_display():
-    from medreconlab.methods import reconstruct, measurement_residual\n    from medreconlab.operators import fft2c
+    from medreconlab.methods import reconstruct, measurement_residual
+    from medreconlab.operators import fft2c
     reference = phantom(32)
     k, mask = mri_measure(reference, acceleration=4)
     for method in ("zero_filled", "iterative_dc"):
