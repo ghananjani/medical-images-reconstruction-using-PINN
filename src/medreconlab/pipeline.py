@@ -3,7 +3,6 @@ from __future__ import annotations
 from .operators import phantom, ct_measure, mri_measure, xray_measure, ifft2c
 from .methods import run_methods
 from .metrics import evaluate
-import numpy as np
 
 
 def experiment(modality: str = "ct", size: int = 64, seed: int = 0,
