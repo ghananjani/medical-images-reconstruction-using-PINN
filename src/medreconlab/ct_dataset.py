@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from scipy.ndimage import affine_transform, gaussian_filter
+from scipy.ndimage import affine_transform
 from skimage.transform import iradon
 from torch.utils.data import Dataset
 
