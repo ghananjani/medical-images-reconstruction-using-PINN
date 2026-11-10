@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medreconlab"
+version = "0.1.0"
+description = "Research-only CT, MRI and X-ray reconstruction with measured baselines"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24", "scipy>=1.11", "scikit-image>=0.21", "pandas>=2.0", "matplotlib>=3.7", "fastapi>=0.110", "uvicorn>=0.27", "streamlit>=1.32", "plotly>=5.18", "pydantic>=2.0"]
+
+[project.optional-dependencies]
+physics = ["torch>=2.2"]
+tracking = ["mlflow>=2.10"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
+
+[project.scripts]
+medrecon-demo = "medreconlab.demo:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
