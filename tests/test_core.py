@@ -91,3 +91,22 @@ def test_torch_ct_physics_optional():
     assert recon.shape == image.shape
     assert len(losses) == 2
     assert np.isfinite(losses).all()
+
+
+def test_mri_forward_adjoint_complex_inner_product():
+    from medreconlab.operators import mri_forward, mri_adjoint
+    rng = np.random.default_rng(19)
+    image = rng.normal(size=(32, 32)) + 1j * rng.normal(size=(32, 32))
+    y = rng.normal(size=(32, 32)) + 1j * rng.normal(size=(32, 32))
+    mask = rng.random((32, 32)) < 0.3
+    left = np.vdot(mri_forward(image, mask), y)
+    right = np.vdot(image, mri_adjoint(y, mask))
+    np.testing.assert_allclose(left, right, rtol=1e-12, atol=1e-12)
+
+
+def test_mri_operator_rejects_shape_mismatch():
+    from medreconlab.operators import mri_forward, mri_adjoint
+    with pytest.raises(ValueError):
+        mri_forward(np.zeros((32, 32)), np.zeros((16, 16)))
+    with pytest.raises(ValueError):
+        mri_adjoint(np.zeros((32, 32)), np.zeros((16, 16)))
