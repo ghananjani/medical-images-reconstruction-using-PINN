@@ -22,7 +22,7 @@ def reconstruct(modality: str, method: str, measured: np.ndarray, **settings) ->
             result = iradon(measured, theta=theta, filter_name="ramp",
                             circle=False, output_size=size)
         else:
-            result = np.zeros((size, size), dtype=float)
+            result = None
             for _ in range(int(settings.get("iterations", 5))):
                 result = iradon_sart(measured, theta=theta, image=result, relaxation=0.1)
             # iradon_sart produces width inferred from detector length; resize if necessary.
