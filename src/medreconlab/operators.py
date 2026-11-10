@@ -31,6 +31,21 @@ def ifft2c(kspace: np.ndarray) -> np.ndarray:
     return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(kspace), norm="ortho"))
 
 
+
+def mri_forward(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Single-coil undersampled orthonormal Fourier forward operator."""
+    if image.shape != mask.shape:
+        raise ValueError("image and mask shapes must match")
+    return np.where(np.asarray(mask, dtype=bool), fft2c(image), 0)
+
+
+def mri_adjoint(kspace: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Hermitian adjoint of mri_forward under the complex inner product."""
+    if kspace.shape != mask.shape:
+        raise ValueError("kspace and mask shapes must match")
+    return ifft2c(np.where(np.asarray(mask, dtype=bool), kspace, 0))
+
+
 def mri_measure(image: np.ndarray, acceleration: int = 4, seed: int = 0,
                 noise: float = 0.0, pattern: str = "equispaced") -> tuple[np.ndarray, np.ndarray]:
     if acceleration not in (2, 4, 8) or noise < 0:
