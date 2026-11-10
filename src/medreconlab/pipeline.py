@@ -1,5 +1,6 @@
 """Reproducible synthetic benchmark pipeline."""
 from __future__ import annotations
+import numpy as np
 from .operators import phantom, ct_measure, mri_measure, xray_measure, ifft2c
 from .methods import run_methods
 from .metrics import evaluate
