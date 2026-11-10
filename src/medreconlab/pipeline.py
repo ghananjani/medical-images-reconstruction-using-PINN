@@ -14,7 +14,7 @@ def experiment(modality: str = "ct", size: int = 64, seed: int = 0,
         measured, theta = ct_measure(reference, projections, angle_span, noise, seed)
         settings = {"theta": theta, "size": size}
         degraded = np.clip(__import__("skimage.transform", fromlist=["iradon"]).iradon(
-            measured, theta=theta, filter_name=None, circle=False, output_size=size), 0, 1)
+            measured, theta=theta, filter_name=None, circle=True, output_size=size), 0, 1)
     elif modality == "mri":
         measured, mask = mri_measure(reference, acceleration, seed, noise)
         settings = {"mask": mask}

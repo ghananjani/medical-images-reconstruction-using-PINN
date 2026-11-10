@@ -17,7 +17,7 @@ def ct_measure(image: np.ndarray, projections: int = 60, angle_span: float = 180
     if not 2 <= projections <= 720 or not 0 < angle_span <= 180 or noise < 0:
         raise ValueError("invalid CT acquisition")
     theta = np.linspace(0, angle_span, projections, endpoint=False)
-    y = radon(image, theta=theta, circle=False)
+    y = radon(image, theta=theta, circle=True)
     if noise:
         y = y + np.random.default_rng(seed).normal(0, noise, y.shape)
     return y.astype(np.float64), theta

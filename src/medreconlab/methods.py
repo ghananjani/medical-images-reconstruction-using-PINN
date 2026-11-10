@@ -12,7 +12,8 @@ METHODS = {"ct": ("fbp", "sart"), "mri": ("zero_filled", "iterative_dc"),
            "xray": ("wiener", "richardson_lucy")}
 
 
-def reconstruct(modality: str, method: str, measured: np.ndarray, **settings) -> np.ndarray:
+def reconstruct(modality: str, method: str, measured: np.ndarray,
+                return_complex: bool = False, **settings) -> np.ndarray:
     if modality not in METHODS or method not in METHODS[modality]:
         raise ValueError(f"unsupported modality/method: {modality}/{method}")
     if modality == "ct":
@@ -20,20 +21,17 @@ def reconstruct(modality: str, method: str, measured: np.ndarray, **settings) ->
         size = int(settings["size"])
         if method == "fbp":
             result = iradon(measured, theta=theta, filter_name="ramp",
-                            circle=False, output_size=size)
+                            circle=True, output_size=size)
         else:
             result = None
             for _ in range(int(settings.get("iterations", 5))):
                 result = iradon_sart(measured, theta=theta, image=result, relaxation=0.1)
-            # iradon_sart produces width inferred from detector length; resize if necessary.
-            if result.shape != (size, size):
-                from skimage.transform import resize
-                result = resize(result, (size, size), anti_aliasing=True)
+            # With circle=True, the detector width equals the image size.
     elif modality == "mri":
         mask = np.asarray(settings["mask"], dtype=bool)
         k = np.asarray(measured, dtype=np.complex128)
         if method == "zero_filled":
-            result = np.abs(ifft2c(k))
+            result = ifft2c(k)
         else:
             # Iterative projected smoothing: an explicit, simple baseline, not compressed sensing.
             image = ifft2c(k)
@@ -42,7 +40,10 @@ def reconstruct(modality: str, method: str, measured: np.ndarray, **settings) ->
                 proposal = fft2c(prior)
                 proposal[mask] = k[mask]  # exact acquired complex sample consistency
                 image = ifft2c(proposal)
-            result = np.abs(image)
+            result = image
+        if return_complex:
+            return np.asarray(result, dtype=np.complex128)
+        result = np.abs(result)
     else:
         sigma = float(settings.get("sigma", 1.5))
         radius = max(3, int(np.ceil(4 * sigma)))
@@ -62,10 +63,10 @@ def reconstruct(modality: str, method: str, measured: np.ndarray, **settings) ->
 def measurement_residual(modality: str, reconstructed: np.ndarray,
                          measured: np.ndarray, **settings) -> float:
     if modality == "ct":
-        predicted = radon(reconstructed, theta=np.asarray(settings["theta"]), circle=False)
+        predicted = radon(reconstructed, theta=np.asarray(settings["theta"]), circle=True)
     elif modality == "mri":
         mask = np.asarray(settings["mask"], dtype=bool)
-        predicted = fft2c(reconstructed.astype(np.complex128))[mask]
+        predicted = fft2c(np.asarray(reconstructed, dtype=np.complex128))[mask]
         measured = measured[mask]
     else:
         predicted = gaussian_filter(reconstructed, sigma=float(settings.get("sigma", 1.5)),
@@ -78,9 +79,11 @@ def run_methods(modality: str, measured: np.ndarray, settings: dict) -> dict:
     results = {}
     for method in METHODS[modality]:
         start = time.perf_counter()
-        image = reconstruct(modality, method, measured, **settings)
+        raw = reconstruct(modality, method, measured,
+                          return_complex=(modality == "mri"), **settings)
         elapsed = time.perf_counter() - start
+        image = np.abs(raw) if modality == "mri" else raw
         results[method] = {"image": image, "runtime_s": elapsed,
                            "measurement_residual": measurement_residual(
-                               modality, image, measured, **settings)}
+                               modality, raw, measured, **settings)}
     return results
