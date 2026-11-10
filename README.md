@@ -4,8 +4,8 @@
 
 ## Implemented in this milestone
 
-- **CT:** Shepp-Logan phantom, Radon measurements, filtered backprojection (FBP), SART iterations, limited-angle geometry, additive Gaussian sinogram noise; optional differentiable PyTorch Radon forward model with projection-consistent neural-field-style pixel optimization.
-- **MRI:** complex-valued 2D Cartesian FFT measurements, seeded equispaced/random undersampling, zero-filled inverse FFT and iterative wavelet-free TV-style proximal reconstruction, exact acquired k-space projection; optional PyTorch data-consistency optimization.
+- **CT:** Shepp-Logan phantom, Radon measurements, filtered backprojection (FBP), SART iterations on a circular reconstruction grid, limited-angle geometry, additive Gaussian sinogram noise; optional differentiable PyTorch Radon forward model with projection-consistent neural-field-style pixel optimization.
+- **MRI:** complex-valued 2D Cartesian FFT measurements, seeded equispaced/random undersampling, zero-filled inverse FFT and iterative wavelet-free TV-style proximal reconstruction, exact acquired complex k-space projection before magnitude display; optional PyTorch data-consistency optimization.
 - **X-ray:** explicit blur/noise degradation, Wiener deconvolution, Richardson-Lucy restoration.
 - Reference-conditioned PSNR, SSIM, MSE, RMSE, MAE, NRMSE; measurement residuals; wall-clock runtime; reproducible CSV/PNG/JSON demo exports.
 - FastAPI and Streamlit exploratory interfaces; CPU smoke-test workflow.
@@ -32,9 +32,9 @@ Optional torch physics optimization: `pip install -e ".[physics]"`.
 
 ## Scientific methodology
 
-CT forward operator uses `skimage.transform.radon`; FBP uses `iradon`; SART uses `iradon_sart`. Angles are degrees in [0, 180). Its PyTorch differentiable forward approximation uses affine grid sampling and a line integral sum, so the numerical model is not identical to scikit-image Radon; train and evaluate consistency with the same operator.
+CT forward operator uses `skimage.transform.radon(circle=True)`; FBP uses `iradon(circle=True)`; SART uses `iradon_sart`. This shared geometry keeps detector and image widths equal, without rescaling the SART output. The circular field-of-view assumption is important: image content outside the inscribed disk is not modeled. Angles are degrees in [0, 180). Its PyTorch differentiable forward approximation uses affine grid sampling and a line integral sum, so the numerical model is not identical to scikit-image Radon; train and evaluate consistency with the same operator.
 
-MRI FFT is orthonormal with centered k-space (`fftshift(fft2(ifftshift(x), norm="ortho"))`). An acquired sample mask operates on complex k-space; zero-fill and iterative methods reuse exactly the same samples. Iterative MRI prior is Gaussian smoothing followed by hard complex k-space consistency: a heuristic, **not** formal compressed sensing. This first release supports single-coil only.
+MRI FFT is orthonormal with centered k-space (`fftshift(fft2(ifftshift(x), norm="ortho"))`). An acquired sample mask operates on complex k-space; zero-fill and iterative methods reuse exactly the same samples. Physics residuals are evaluated using the complex-valued reconstruction **before** magnitude conversion and clipping; taking the magnitude first would destroy phase and invalidate a claim of exact measured-data consistency. Iterative MRI prior is Gaussian smoothing followed by hard complex k-space consistency: a heuristic, **not** formal compressed sensing. This first release supports single-coil only.
 
 X-ray is 2D restoration of a radiograph under Gaussian blur and Gaussian noise. It is **not** 3D reconstruction from a single image.
 
@@ -47,6 +47,17 @@ Each demo saves input, reference, reconstructions, residual maps, metrics CSV, a
 Optional datasets for future work: fastMRI (follow NYU access and use restrictions), NIH ChestX-ray14 and CheXpert (follow each dataset's license and agreements). Deidentify DICOM metadata and split by patient IDs when available. Do not add patient datasets to this repo.
 
 API docs: `http://127.0.0.1:8000/docs`. Endpoints include health, modalities, methods, datasets, reconstruct, compare, experiments and reports. Current jobs are synchronous/in-memory; cancellation and persistence are **not implemented**.
+
+## Physics optimizer checks
+
+The optional functions `ct_optimize` and `mri_optimize` live in `medreconlab.physics`. They are physics-informed image-parameter optimization methods, **not** PDE-based physics-informed neural networks or trained U-Nets. CT optimization expects measurements from its own differentiable approximate projection operator, in radians. The scikit-image Radon model is not numerically interchangeable with the torch implementation. The MRI optimizer starts from centered complex k-space and projects acquired coefficients exactly at the end.
+
+To run optional differentiable operator and gradient tests:
+
+```bash
+pip install -e '.[dev,physics]'
+pytest -q tests/test_core.py -k torch
+```
 
 ## Development
 
