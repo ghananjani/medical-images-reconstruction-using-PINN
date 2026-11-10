@@ -25,7 +25,7 @@ def torch_ct_forward(image, angles):
         matrix = mat.reshape(1, 2, 3).expand(image.shape[0], -1, -1)
         grid = F.affine_grid(matrix, image.shape, align_corners=False)
         rotated = F.grid_sample(image, grid, align_corners=False, padding_mode="zeros")
-        projections.append(rotated.sum(dim=-2))
+        projections.append(rotated.sum(dim=-2).squeeze(1))
     if not projections:
         raise ValueError("at least one angle is required")
     return torch.stack(projections, dim=-1)
