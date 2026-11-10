@@ -9,7 +9,7 @@
 - **X-ray:** explicit blur/noise degradation, Wiener deconvolution, Richardson-Lucy restoration.
 - Reference-conditioned PSNR, SSIM, MSE, RMSE, MAE, NRMSE; measurement residuals; wall-clock runtime; reproducible CSV/PNG/JSON demo exports.
 - FastAPI and Streamlit exploratory interfaces; CPU smoke-test workflow.
-- **Not yet implemented:** supervised U-Net training, PDE-based PINNs, diffusion/Transformer architectures, MLflow registry, persistent background job queues, production-grade upload/DICOM support, multicoil MRI/CG-SENSE, downloadable research PDF, patient-level clinical dataset tooling. These are future phases, not working features.
+- **Not yet implemented:** PDE-based PINNs, diffusion/Transformer architectures, MLflow registry, persistent background job queues, production-grade upload/DICOM support, multicoil MRI/CG-SENSE, downloadable research PDF, patient-level clinical dataset tooling. These are future phases, not working features.
 
 ## Quick start
 
@@ -67,3 +67,52 @@ pytest -q
 docker build -t medreconlab .
 docker run --rm -p 8501:8501 medreconlab
 ```
+
+## Phase 4: supervised CT U-Net training
+
+A **working 2D PyTorch U-Net** learns to post-process filtered-backprojection (FBP)
+images into synthetic CT references. This is **supervised reconstruction/restoration**,
+not a PDE-based PINN. It uses a two-level encoder-decoder, skip connections,
+group normalization and a sigmoid unit-range output.
+
+```bash
+pip install -e ".[dev,physics]"
+medrecon-train-ct --output outputs/ct_unet --size 64 --projections 30 \
+  --train-cases 128 --val-cases 32 --test-cases 32 \
+  --epochs 30 --patience 6 --batch-size 8 --channels 16 --seed 42
+medrecon-compare-ct --checkpoint outputs/ct_unet/best.pt \
+  --output outputs/ct_unet/benchmark --cases 32
+```
+
+For an inexpensive local CPU smoke run:
+
+```bash
+medrecon-train-ct --output outputs/ct_unet_smoke --size 32 \
+  --projections 20 --train-cases 4 --val-cases 2 --test-cases 2 \
+  --epochs 2 --batch-size 2 --channels 4 --device cpu
+medrecon-compare-ct --checkpoint outputs/ct_unet_smoke/best.pt \
+  --output outputs/ct_unet_smoke/benchmark --cases 2
+```
+
+The trainer supports shuffled mini-batches, AdamW, L1 training/validation
+loss, gradient clipping, automatic CUDA mixed precision when available,
+a plateau LR scheduler, early stopping, and atomic best-validation
+checkpoints. It saves `best.pt`, `history.csv`, `loss_curve.png`,
+and `manifest.json` with seed, split seeds, package versions, and Git SHA.
+Do not load untrusted checkpoint files.
+
+The held-out benchmark measures FBP, SART and U-Net **against the same synthetic
+sinogram and reference** for each test case, and exports `per_case.csv`,
+`summary.csv`, `comparison.png`, and `manifest.json`. Only validation
+loss selects the best checkpoint; the test seeds are reserved for the final
+comparison. Train seeds start at 100000+seed, validation at 200000+seed, and
+test at 300000+seed (for seed <100000). They are disjoint procedural variants
+of **one phantom family**, not patient-level or independent anatomical data.
+
+**Important limitations:** These preliminary synthetic results are not clinical
+validation, and this U-Net is not assumed to outperform FBP/SART. Runtime
+includes model-only inference for U-Net but full iterative reconstruction
+for SART, and is not a normalized acquisition-to-reconstruction measurement.
+The model is not yet integrated as a selectable method in the dashboard/API,
+which deliberately continue to show their existing classical methods.
+CPU CI trains only a tiny smoke model; it is not a publication-grade benchmark.

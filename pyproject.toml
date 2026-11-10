@@ -17,6 +17,8 @@ dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
 
 [project.scripts]
 medrecon-demo = "medreconlab.demo:main"
+medrecon-train-ct = "medreconlab.train_ct:main"
+medrecon-compare-ct = "medreconlab.compare_ct:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
