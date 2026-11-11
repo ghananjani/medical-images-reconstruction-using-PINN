@@ -96,8 +96,8 @@ medrecon-compare-ct --checkpoint outputs/ct_unet_smoke/best.pt \
 
 The trainer supports shuffled mini-batches, AdamW, L1 training/validation
 loss, gradient clipping, automatic CUDA mixed precision when available,
-a plateau LR scheduler, early stopping, and atomic best-validation
-checkpoints. It saves `best.pt`, `history.csv`, `loss_curve.png`,
+a plateau LR scheduler, early stopping, and atomic best-validation and latest-state
+checkpoints. It saves `best.pt`, `last.pt`, `history.csv`, `loss_curve.png`,
 and `manifest.json` with seed, split seeds, package versions, and Git SHA.
 Do not load untrusted checkpoint files.
 
@@ -113,6 +113,41 @@ of **one phantom family**, not patient-level or independent anatomical data.
 validation, and this U-Net is not assumed to outperform FBP/SART. Runtime
 includes model-only inference for U-Net but full iterative reconstruction
 for SART, and is not a normalized acquisition-to-reconstruction measurement.
-The model is not yet integrated as a selectable method in the dashboard/API,
-which deliberately continue to show their existing classical methods.
+The trained U-Net is opt-in in Streamlit's CT dashboard (not exposed by FastAPI).
+Use a trusted **local** checkpoint within `outputs/`, and choose the same image
+size and CT projection count used for training. The dashboard computes real
+reference metrics and projection residuals. Do not load downloaded or untrusted
+checkpoint binaries. Models trained on these simulations may generalize poorly.
 CPU CI trains only a tiny smoke model; it is not a publication-grade benchmark.
+
+## Continue an interrupted CT training run
+
+The trainer records `last.pt` every epoch with model, optimizer, scheduler,
+automatic-mixed-precision scaler, full loss history and early-stopping state.
+Training shuffles examples using a per-epoch deterministic generator, so
+continuing from `last.pt` can reproduce a CPU training schedule when the
+software and hardware environment is unchanged.
+
+```bash
+# First train 3 epochs.
+medrecon-train-ct --output outputs/ct_resume --size 32 --projections 20 \
+  --train-cases 8 --val-cases 4 --test-cases 4 \
+  --epochs 3 --patience 5 --channels 4 --device cpu
+
+# Continue to 6 total epochs with the same data/model/optimizer settings.
+medrecon-train-ct --output outputs/ct_resume --size 32 --projections 20 \
+  --train-cases 8 --val-cases 4 --test-cases 4 \
+  --epochs 6 --patience 5 --channels 4 --device cpu \
+  --resume outputs/ct_resume/last.pt
+```
+
+Only the total epoch budget, output path, device, and resume path can differ
+from the saved configuration. The existing `best.pt` must be in the same
+directory. An already early-stopped run cannot be resumed. The test split is
+not used to select checkpoints. No training checkpoints or patient data are
+committed to the repository.
+
+For interactive comparison, run `streamlit run dashboard/app.py`, select
+CT, check **Use locally trained CT U-Net**, then enter your local checkpoint
+(e.g. `outputs/ct_resume/best.pt`). The dashboard remains usable without
+PyTorch if you leave this option unchecked.
