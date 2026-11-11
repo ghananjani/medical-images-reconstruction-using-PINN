@@ -40,6 +40,7 @@ class TrainConfig:
     lr: float = 0.001
     seed: int = 42
     device: str = "auto"
+    resume: str = ""
 
     def validate(self):
         if self.size < 16 or self.size % 4:
@@ -73,12 +74,13 @@ def _git_sha():
         return None
 
 
-def _make_loader(cfg, n, offset, shuffle):
+def _make_loader(cfg, n, offset, shuffle, epoch=0):
     dataset = SyntheticCTPairs(n=n, size=cfg.size, projections=cfg.projections,
                                angle_span=cfg.angle_span, noise=cfg.noise,
                                seed_offset=offset)
+    generator = torch.Generator().manual_seed(cfg.seed + 1009 * epoch + 7)
     return DataLoader(dataset, batch_size=cfg.batch_size, shuffle=shuffle,
-                      num_workers=0)
+                      generator=generator, num_workers=0)
 
 
 def _epoch(model, loader, loss_fn, device, optimizer=None, scaler=None):
@@ -122,7 +124,6 @@ def train_ct_unet(cfg: TrainConfig):
     train_seed = 100_000 + cfg.seed
     val_seed = 200_000 + cfg.seed
     test_seed = 300_000 + cfg.seed
-    train_loader = _make_loader(cfg, cfg.train_cases, train_seed, True)
     val_loader = _make_loader(cfg, cfg.val_cases, val_seed, False)
     # The test set is deliberately not accessed during optimization.
     model = CTUNet(cfg.channels).to(device)
@@ -136,8 +137,38 @@ def train_ct_unet(cfg: TrainConfig):
     bad_epochs = 0
     history = []
     checkpoint = out / "best.pt"
+    last_checkpoint = out / "last.pt"
+    start_epoch = 1
+    if cfg.resume:
+        resume_path = Path(cfg.resume).resolve()
+        if resume_path != last_checkpoint.resolve():
+            raise ValueError("resume must be the last.pt in the configured output folder")
+        saved = torch.load(resume_path, map_location=device, weights_only=True)
+        previous = dict(saved["config"])
+        current = asdict(cfg)
+        # Expanding the epoch budget is allowed; changing data/model/optimizer isn't.
+        for key in current.keys() - {"epochs", "output", "device", "resume"}:
+            if current[key] != previous[key]:
+                raise ValueError(f"incompatible resume configuration: {key}")
+        model.load_state_dict(saved["state_dict"])
+        optimizer.load_state_dict(saved["optimizer_state"])
+        scheduler.load_state_dict(saved["scheduler_state"])
+        if "scaler_state" in saved:
+            scaler.load_state_dict(saved["scaler_state"])
+        best = float(saved["best_val_mae"])
+        best_epoch = int(saved["best_epoch"])
+        bad_epochs = int(saved["bad_epochs"])
+        history = list(saved["history"])
+        start_epoch = int(saved["epoch"]) + 1
+        if start_epoch > cfg.epochs:
+            raise ValueError("resume target epochs must exceed checkpoint epoch")
+        if bad_epochs >= cfg.patience:
+            raise ValueError("cannot resume a run that already early-stopped")
+        if not checkpoint.is_file():
+            raise ValueError("best.pt is missing alongside last.pt")
 
-    for epoch in range(1, cfg.epochs + 1):
+    for epoch in range(start_epoch, cfg.epochs + 1):
+        train_loader = _make_loader(cfg, cfg.train_cases, train_seed, True, epoch=epoch)
         train_loss = _epoch(model, train_loader, loss_fn, device, optimizer, scaler)
         val_loss = _epoch(model, val_loader, loss_fn, device)
         scheduler.step(val_loss)
@@ -157,6 +188,18 @@ def train_ct_unet(cfg: TrainConfig):
             os.replace(temp, checkpoint)
         else:
             bad_epochs += 1
+        # Save latest optimizer/scheduler state even when validation worsens.
+        # Keep the best checkpoint independently for held-out evaluation.
+        latest = {
+            "state_dict": model.state_dict(), "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(), "scaler_state": scaler.state_dict(),
+            "config": asdict(cfg), "epoch": epoch, "best_epoch": best_epoch,
+            "best_val_mae": best, "bad_epochs": bad_epochs, "history": history,
+            "seed_splits": {"train": train_seed, "val": val_seed, "test": test_seed},
+        }
+        temp = out / "last.pt.tmp"
+        torch.save(latest, temp)
+        os.replace(temp, last_checkpoint)
         if bad_epochs >= cfg.patience:
             break
 
@@ -176,7 +219,8 @@ def train_ct_unet(cfg: TrainConfig):
     plt.close(fig)
     manifest = {"config": asdict(cfg), "best_epoch": best_epoch,
                 "best_val_mae": best, "epochs_completed": len(history),
-                "early_stopped": len(history) < cfg.epochs, "device": str(device),
+                "early_stopped": bad_epochs >= cfg.patience, "device": str(device),
+                "resumed_from": cfg.resume or None, "checkpoint_last": str(last_checkpoint),
                 "torch": torch.__version__, "numpy": np.__version__,
                 "python": platform.python_version(), "git_commit": _git_sha(),
                 "split_seed_offsets": {"train": train_seed, "val": val_seed,
