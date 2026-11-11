@@ -151,3 +151,48 @@ For interactive comparison, run `streamlit run dashboard/app.py`, select
 CT, check **Use locally trained CT U-Net**, then enter your local checkpoint
 (e.g. `outputs/ct_resume/best.pt`). The dashboard remains usable without
 PyTorch if you leave this option unchecked.
+
+## CT acquisition ladder and statistical analysis
+
+A separate CLI runs controlled CT experiments with the **same measured sinogram
+and reference for every method within each case**. Cases vary by projection
+count, limited/full angle, noise and held-out procedural seed.
+
+```bash
+# Requires PyTorch because synthetic CT case generation uses the CT dataset module.
+pip install -e ".[dev,physics]"
+medrecon-ct-sweep --output outputs/ct_ladder \
+  --size 64 --projections 30 60 90 180 --angle-spans 120 180 \
+  --noise-levels 0 .01 .03 --seeds 300042 300043 300044 \
+  --iterations 5 --bootstrap-repeats 1000
+```
+
+Creates `cases.csv`, `summary.csv`, `paired_vs_fbp.csv`,
+`psnr_vs_projections.png`, `quality_vs_runtime.png`, and a manifest with
+parameters, versions, Git commit and CSV SHA256. It computes PSNR, SSIM,
+RMSE, reconstruction-only runtime and normalized sinogram residuals.
+Percentile bootstrap confidence bounds resample held-out **procedural cases**
+within each acquisition setting. Method improvement over FBP is calculated
+**pairwise on the same case seeds**, rather than comparing unrelated averages.
+With fewer than two case seeds, CI columns are undefined. The bootstrap is
+descriptive and does not claim patient-level generalization.
+
+**U-Net checkpoint policy:** The full acquisition ladder deliberately compares
+FBP and SART without using an out-of-distribution U-Net. To include U-Net,
+supply **one** acquisition setting and a trusted checkpoint trained at the
+same size, projection count, angular span **and noise level**:
+
+```bash
+medrecon-ct-sweep --size 64 --projections 30 --angle-spans 180 \
+  --noise-levels .01 --seeds 300042 300043 300044 \
+  --checkpoint outputs/ct_unet/best.pt --output outputs/ct_unet/sweep
+```
+
+Incompatible checkpoints fail explicitly. Comparing U-Net across a full
+projection ladder requires separately trained matching checkpoints (future
+work), or an explicitly labelled out-of-distribution experiment. A single
+phantom family and small numbers of procedural seeds are not clinical evidence.
+
+**Runtime caution:** FBP and SART times cover reconstruction. U-Net's runtime
+covers only network inference, **not** initial FBP preprocessing; therefore
+method-only runtime plots are not end-to-end, equal-scope timing claims.

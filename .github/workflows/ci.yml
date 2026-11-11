@@ -47,6 +47,11 @@ jobs:
         run: pytest -v -rs tests/test_core.py -k test_torch
       - name: U-Net training, data and checkpoint tests
         run: pytest -q -rs tests/test_unet.py
+      - name: CT benchmark statistical integrity tests
+        run: pytest -q -rs tests/test_ct_sweep.py
+      - name: Synthetic CT projection/noise sweep smoke test
+        run: |
+          medrecon-ct-sweep --output outputs/ci_ct_sweep --size 32 --projections 16 24 --angle-spans 120 180 --noise-levels 0 .01 --seeds 300101 300102 --iterations 1 --bootstrap-repeats 100
       - name: Reproducible synthetic CT training smoke test
         run: |
           medrecon-train-ct --output outputs/ci_unet --size 32 --projections 20 --train-cases 4 --val-cases 2 --test-cases 2 --epochs 2 --batch-size 2 --channels 4 --device cpu
@@ -60,4 +65,5 @@ jobs:
             outputs/ci_unet/loss_curve.png
             outputs/ci_unet/manifest.json
             outputs/ci_unet/benchmark/
+            outputs/ci_ct_sweep/
           if-no-files-found: error
