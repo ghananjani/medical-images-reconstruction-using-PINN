@@ -66,3 +66,66 @@ def test_unet_invalid_configuration(tmp_path):
     cfg = TrainConfig(output=str(tmp_path), size=30)
     with pytest.raises(ValueError):
         train_ct_unet(cfg)
+
+
+def test_resume_matches_uninterrupted_training(tmp_path):
+    """Epoch-specific sampling must make a two-stage run reproducible on CPU."""
+    import csv
+    from dataclasses import replace
+
+    torch.set_num_threads(2)
+    base = TrainConfig(size=32, projections=20, noise=0.0,
+                       train_cases=4, val_cases=2, test_cases=2,
+                       batch_size=2, channels=4, epochs=3, patience=4,
+                       seed=9, device="cpu")
+    full = replace(base, output=str(tmp_path / "full"))
+    split = replace(base, output=str(tmp_path / "split"), epochs=1)
+    train_ct_unet(full)
+    train_ct_unet(split)
+    last = tmp_path / "split/last.pt"
+    assert last.is_file()
+    continued = replace(base, output=str(tmp_path / "split"), resume=str(last))
+    manifest = train_ct_unet(continued)
+    assert manifest["epochs_completed"] == 3
+
+    with (tmp_path / "full/history.csv").open() as f:
+        uninterrupted = list(csv.DictReader(f))
+    with (tmp_path / "split/history.csv").open() as f:
+        resumed = list(csv.DictReader(f))
+    assert len(uninterrupted) == len(resumed) == 3
+    for a, b in zip(uninterrupted, resumed):
+        assert a["epoch"] == b["epoch"]
+        np.testing.assert_allclose(float(a["train_mae"]), float(b["train_mae"]),
+                                   rtol=1e-6, atol=1e-7)
+        np.testing.assert_allclose(float(a["val_mae"]), float(b["val_mae"]),
+                                   rtol=1e-6, atol=1e-7)
+
+
+def test_resume_rejects_incompatible_configuration(tmp_path):
+    from dataclasses import replace
+    cfg = TrainConfig(output=str(tmp_path), size=32, projections=20,
+                      train_cases=2, val_cases=2, test_cases=2, epochs=1,
+                      patience=2, batch_size=2, channels=4, device="cpu")
+    train_ct_unet(cfg)
+    with pytest.raises(ValueError, match="incompatible resume"):
+        train_ct_unet(replace(cfg, epochs=2, projections=30,
+                              resume=str(tmp_path / "last.pt")))
+
+
+def test_checkpoint_inference_validates_geometry(tmp_path):
+    from medreconlab.ct_inference import infer_ct_checkpoint
+    cfg = TrainConfig(output=str(tmp_path), size=32, projections=20,
+                      train_cases=2, val_cases=2, test_cases=2, epochs=1,
+                      patience=2, batch_size=2, channels=4, device="cpu")
+    train_ct_unet(cfg)
+    case = ct_case(32, 20, cfg.noise, 300_000 + cfg.seed, cfg.angle_span)
+    result = infer_ct_checkpoint(tmp_path / "best.pt", case["fbp"],
+                                 case["sinogram"], case["theta"],
+                                 reference=case["reference"])
+    assert result["image"].shape == (32, 32)
+    assert "psnr" in result["metrics"]
+    assert np.isfinite(result["measurement_residual"])
+    with pytest.raises(ValueError, match="projection count"):
+        infer_ct_checkpoint(tmp_path / "best.pt", case["fbp"],
+                            case["sinogram"][:, :-1], case["theta"][:-1],
+                            reference=case["reference"])
