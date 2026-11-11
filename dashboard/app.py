@@ -17,6 +17,14 @@ seed = st.sidebar.number_input("Random seed", value=0, min_value=0)
 projections = st.sidebar.slider("CT projections", 10, 180, 60)
 acceleration = st.sidebar.selectbox("MRI acceleration", [2, 4, 8], index=1)
 noise = st.sidebar.slider("Measurement noise", 0.0, 0.1, 0.01, 0.005)
+use_unet = st.sidebar.checkbox("Use locally trained CT U-Net", value=False,
+                               disabled=modality != "ct")
+checkpoint_path = None
+if use_unet:
+    st.sidebar.caption("Trusted local checkpoints only. No external uploads.")
+    checkpoint_path = st.sidebar.text_input(
+        "Checkpoint inside outputs/", value="outputs/ct_unet/best.pt")
+
 
 
 @st.cache_data(show_spinner=False)
@@ -36,6 +44,26 @@ if page == "Overview":
 else:
     with st.spinner("Running actual reconstruction..."):
         outcome = compute(modality, size, int(seed), projections, acceleration, noise)
+    if modality == "ct" and use_unet and checkpoint_path:
+        from pathlib import Path
+        from medreconlab.ct_inference import infer_ct_checkpoint
+
+        output_root = Path("outputs").resolve()
+        selected = Path(checkpoint_path).resolve()
+        if not selected.is_relative_to(output_root) or not selected.is_file():
+            st.warning("Choose an existing trusted checkpoint within the outputs/ folder.")
+        else:
+            try:
+                from skimage.transform import iradon
+                fbp = iradon(outcome["measured"], theta=outcome["settings"]["theta"],
+                             filter_name="ramp", circle=True, output_size=size)
+                outcome["reconstructions"]["unet"] = infer_ct_checkpoint(
+                    selected, fbp, outcome["measured"], outcome["settings"]["theta"],
+                    reference=outcome["reference"])
+                st.caption("U-Net inference from a locally trained checkpoint. "
+                           "Training and current synthetic acquisition must match.")
+            except (RuntimeError, ValueError, ImportError, OSError, KeyError) as exc:
+                st.error(f"Checkpoint inference unavailable: {exc}")
     rows = [{"method": m, **v["metrics"], "runtime_s": v["runtime_s"],
              "measurement_residual": v["measurement_residual"]}
             for m, v in outcome["reconstructions"].items()]
