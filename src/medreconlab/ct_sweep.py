@@ -252,13 +252,21 @@ def main():
     parser.add_argument("--bootstrap-seed", type=int, default=11)
     parser.add_argument("--checkpoint")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--mlflow-uri", default="", help="Opt-in MLflow tracking URI")
+    parser.add_argument("--mlflow-experiment", default="MedReconLab-CT")
     args = parser.parse_args()
-    config = CTSweepConfig(**{**vars(args),
+    config = CTSweepConfig(**{**{key: value for key, value in vars(args).items()
+                                if key not in ("mlflow_uri", "mlflow_experiment")},
                              "angle_spans": tuple(args.angle_spans),
                              "noise_levels": tuple(args.noise_levels),
                              "projections": tuple(args.projections),
                              "seeds": tuple(args.seeds)})
     manifest = export_ct(sweep_ct(config), config)
+    if args.mlflow_uri:
+        from .tracking import log_ct_sweep
+        manifest["mlflow_run_id"] = log_ct_sweep(
+            config.output, config, manifest, args.mlflow_uri, args.mlflow_experiment)
+        (Path(config.output) / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
 
 
