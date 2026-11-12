@@ -244,9 +244,16 @@ def main():
     for key, default in asdict(TrainConfig()).items():
         parser.add_argument("--" + key.replace("_", "-"), type=type(default),
                             default=default)
+    parser.add_argument("--mlflow-uri", default="", help="Opt-in MLflow tracking URI")
+    parser.add_argument("--mlflow-experiment", default="MedReconLab-CT")
     args = parser.parse_args()
     cfg = TrainConfig(**{k: getattr(args, k) for k in asdict(TrainConfig())})
     manifest = train_ct_unet(cfg)
+    if args.mlflow_uri:
+        from .tracking import log_training
+        manifest["mlflow_run_id"] = log_training(
+            cfg.output, cfg, manifest, args.mlflow_uri, args.mlflow_experiment)
+        (Path(cfg.output) / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
 
 
