@@ -231,3 +231,19 @@ manifest includes the MLflow run ID when tracking is enabled. Failed remote
 tracking requests are reported rather than silently ignored. This initial
 integration is *experiment tracking only*, not model registry, remote job
 scheduling or clinical dataset handling.
+
+## Streamlit MLflow experiment viewer
+
+After recording runs with `--mlflow-uri "sqlite:///$(pwd)/mlflow.db"`, start
+`streamlit run dashboard/app.py` and open **Experiments**. Enter
+`mlflow.db`, select **Load MLflow runs**, inspect real run parameters,
+recorded validation losses, learning-rate curves and aggregate metrics,
+or export the run summary as CSV. The viewer is **read-only** and supports
+only local SQLite databases inside the current project directory; it does
+not connect to arbitrary remote tracking services or download artifacts.
+Install the optional tracking dependencies first: `pip install -e ".[tracking]"`.
+
+For a responsible research-paper pathway, read
+[`docs/research_protocol.md`](docs/research_protocol.md). The protocol
+separates existing synthetic engineering results from external patient-level
+validation required for stronger scientific claims.
