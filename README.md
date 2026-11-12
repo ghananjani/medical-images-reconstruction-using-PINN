@@ -207,20 +207,20 @@ runs outside your workstation.
 
 ```bash
 pip install -e ".[dev,physics,tracking]"
-# Local file store; no external MLflow server or patient dataset is required.
+# Local SQLite tracking store; no external server or patient dataset is required.
 medrecon-train-ct --output outputs/mlflow_ct --size 32 --projections 20 \
   --train-cases 4 --val-cases 2 --test-cases 2 --epochs 2 \
   --channels 4 --device cpu \
-  --mlflow-uri "file://$(pwd)/mlruns" \
+  --mlflow-uri "sqlite:///$(pwd)/mlflow.db" \
   --mlflow-experiment MedReconLab-CT
 
 medrecon-ct-sweep --output outputs/mlflow_sweep --size 32 \
   --projections 16 24 --angle-spans 120 180 --noise-levels 0 .01 \
   --seeds 300101 300102 --iterations 1 --bootstrap-repeats 100 \
-  --mlflow-uri "file://$(pwd)/mlruns" \
+  --mlflow-uri "sqlite:///$(pwd)/mlflow.db" \
   --mlflow-experiment MedReconLab-CT
 
-mlflow ui --backend-store-uri "file://$(pwd)/mlruns"
+mlflow ui --backend-store-uri "sqlite:///$(pwd)/mlflow.db"
 ```
 
 Open the MLflow UI at `http://127.0.0.1:5000`. The training run logs
