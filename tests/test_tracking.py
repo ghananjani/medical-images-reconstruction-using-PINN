@@ -21,7 +21,7 @@ def test_real_mlflow_training_run(tmp_path):
     (out / "loss_curve.png").write_bytes(b"research placeholder for artifact API test")
     (out / "manifest.json").write_text('{"synthetic": true}')
     (out / "best.pt").write_bytes(b"must never be sent to MLflow")
-    uri = (tmp_path / "mlruns").as_uri()
+    uri = "sqlite:///" + str(tmp_path / "tracking_train.db")
     run_id = log_training(out, {"size": 32, "seed": 42}, {
         "best_val_mae": .15, "best_epoch": 2, "git_commit": "test-sha"
     }, uri, "medrecon-test-train")
@@ -44,7 +44,7 @@ def test_real_mlflow_sweep_run(tmp_path):
     for name in ("cases.csv", "paired_vs_fbp.csv", "psnr_vs_projections.png",
                  "quality_vs_runtime.png", "manifest.json"):
         (out / name).write_text("synthetic test data")
-    uri = (tmp_path / "tracking").as_uri()
+    uri = "sqlite:///" + str(tmp_path / "tracking_sweep.db")
     run_id = log_ct_sweep(out, {"projections": (30,)},
                           {"unique_cases": 2, "git_commit": "test-sha"}, uri,
                           "medrecon-test-sweep")
