@@ -41,6 +41,40 @@ if page == "Overview":
     Advanced learned models are **not implemented**. No real patient data is loaded.
     """)
     st.json({"available_methods": METHODS})
+elif page == "Experiments":
+    st.markdown("### Recorded CT experiments")
+    st.caption("Read-only local SQLite MLflow data. No remote tracking servers or artifacts.")
+    database = st.text_input("Tracking database inside project", value="mlflow.db")
+    if st.button("Load MLflow runs"):
+        try:
+            from medreconlab.experiment_view import read_experiment_history
+
+            summaries, curves = read_experiment_history(database)
+            st.session_state["mlflow_summaries"] = summaries
+            st.session_state["mlflow_curves"] = curves
+        except (ValueError, FileNotFoundError, RuntimeError, OSError) as exc:
+            st.error(str(exc))
+            st.session_state.pop("mlflow_summaries", None)
+            st.session_state.pop("mlflow_curves", None)
+    summaries = st.session_state.get("mlflow_summaries", [])
+    curves = st.session_state.get("mlflow_curves", {})
+    if summaries:
+        st.dataframe(pd.DataFrame(summaries), use_container_width=True)
+        selected_id = st.selectbox("Inspect run", [r["run_id"] for r in summaries],
+                                  format_func=lambda run_id: next(
+                                      (f'{r["name"]} | {run_id[:10]}' for r in summaries
+                                       if r["run_id"] == run_id), run_id))
+        history = pd.DataFrame(curves.get(selected_id, []))
+        if not history.empty:
+            st.line_chart(history.pivot_table(index="step", columns="metric",
+                                             values="value", aggfunc="last"))
+        else:
+            st.info("No per-epoch training metrics for this run.")
+        st.download_button("Export run summaries CSV",
+                           pd.DataFrame(summaries).to_csv(index=False),
+                           "mlflow_run_summaries.csv", "text/csv")
+    else:
+        st.info("Run CT training with --mlflow-uri sqlite:///... and load the database.")
 else:
     with st.spinner("Running actual reconstruction..."):
         outcome = compute(modality, size, int(seed), projections, acceleration, noise)
@@ -82,11 +116,6 @@ else:
         st.dataframe(metrics, use_container_width=True)
         st.bar_chart(metrics.set_index("method")[["psnr", "ssim"]])
         st.bar_chart(metrics.set_index("method")[["runtime_s", "measurement_residual"]])
-    if page == "Experiments":
-        st.info("Current run is computed from the sidebar parameters. Persistent MLflow "
-                "experiment history and checkpoints are not yet implemented.")
-        st.json(outcome["parameters"])
-        st.dataframe(metrics)
     if page == "Reports":
         st.dataframe(metrics)
         st.download_button("Export metrics CSV", metrics.to_csv(index=False),
