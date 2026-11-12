@@ -67,3 +67,18 @@ jobs:
             outputs/ci_unet/benchmark/
             outputs/ci_ct_sweep/
           if-no-files-found: error
+
+  tracking-cpu:
+    name: MLflow local experiment tracking (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MLflow tracking and tests
+        run: python -m pip install -e ".[dev,tracking]"
+      - name: Verify local MLflow logging and selective artifacts
+        run: pytest -q -rs tests/test_tracking.py
