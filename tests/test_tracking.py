@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import csv
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
@@ -31,7 +29,7 @@ def test_real_mlflow_training_run(tmp_path):
     run = mlflow.get_run(run_id)
     assert run.data.metrics["val_mae"] == pytest.approx(.15)
     assert run.data.params["size"] == "32"
-    artifacts = [x.path for x in mlflow.artifacts.list_artifacts(run_id, "training")]
+    artifacts = [x.path for x in mlflow.artifacts.list_artifacts(run_id=run_id, artifact_path="training")]
     assert "training/history.csv" in artifacts
     assert "training/best.pt" not in artifacts
 
@@ -54,5 +52,5 @@ def test_real_mlflow_sweep_run(tmp_path):
     run = mlflow.get_run(run_id)
     assert run.data.metrics["fbp_psnr_mean"] == pytest.approx(12.)
     assert run.data.metrics["unique_cases"] == 2
-    paths = [x.path for x in mlflow.artifacts.list_artifacts(run_id, "ct_sweep")]
+    paths = [x.path for x in mlflow.artifacts.list_artifacts(run_id=run_id, artifact_path="ct_sweep")]
     assert "ct_sweep/summary.csv" in paths
