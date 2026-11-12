@@ -12,6 +12,8 @@ from pathlib import Path
 def _mlflow(uri: str):
     if not uri:
         raise ValueError("tracking URI must be nonempty")
+    if uri.startswith("file:"):
+        raise ValueError("filesystem MLflow stores are deprecated; use a sqlite:/// URI")
     try:
         import mlflow
     except ImportError as exc:
