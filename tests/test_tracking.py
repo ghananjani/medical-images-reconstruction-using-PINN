@@ -5,9 +5,9 @@ import csv
 import pandas as pd
 import pytest
 
-mlflow = pytest.importorskip("mlflow")
-
 from medreconlab.tracking import log_ct_sweep, log_training
+
+mlflow = pytest.importorskip("mlflow")
 
 
 def test_real_mlflow_training_run(tmp_path):
