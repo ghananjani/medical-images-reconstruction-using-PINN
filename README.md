@@ -9,7 +9,7 @@
 - **X-ray:** explicit blur/noise degradation, Wiener deconvolution, Richardson-Lucy restoration.
 - Reference-conditioned PSNR, SSIM, MSE, RMSE, MAE, NRMSE; measurement residuals; wall-clock runtime; reproducible CSV/PNG/JSON demo exports.
 - FastAPI and Streamlit exploratory interfaces; CPU smoke-test workflow.
-- **Not yet implemented:** PDE-based PINNs, diffusion/Transformer architectures, MLflow registry, persistent background job queues, production-grade upload/DICOM support, multicoil MRI/CG-SENSE, downloadable research PDF, patient-level clinical dataset tooling. These are future phases, not working features.
+- **Not yet implemented:** PDE-based PINNs, diffusion/Transformer architectures, MLflow model registry, persistent background job queues, production-grade upload/DICOM support, multicoil MRI/CG-SENSE, downloadable research PDF, patient-level clinical dataset tooling. These are future phases, not working features.
 
 ## Quick start
 
@@ -196,3 +196,38 @@ phantom family and small numbers of procedural seeds are not clinical evidence.
 **Runtime caution:** FBP and SART times cover reconstruction. U-Net's runtime
 covers only network inference, **not** initial FBP preprocessing; therefore
 method-only runtime plots are not end-to-end, equal-scope timing claims.
+
+## Optional MLflow experiment tracking
+
+Training and CT sweep scripts support **opt-in MLflow tracking**, disabled by
+default. This logs only synthetic research metadata, scalar metrics and
+generated CSV/PNG/JSON reports, **not** model checkpoint files, raw medical
+images, patient data, or secrets. Use a trusted tracking server when sharing
+runs outside your workstation.
+
+```bash
+pip install -e ".[dev,physics,tracking]"
+# Local file store; no external MLflow server or patient dataset is required.
+medrecon-train-ct --output outputs/mlflow_ct --size 32 --projections 20 \
+  --train-cases 4 --val-cases 2 --test-cases 2 --epochs 2 \
+  --channels 4 --device cpu \
+  --mlflow-uri "file://$(pwd)/mlruns" \
+  --mlflow-experiment MedReconLab-CT
+
+medrecon-ct-sweep --output outputs/mlflow_sweep --size 32 \
+  --projections 16 24 --angle-spans 120 180 --noise-levels 0 .01 \
+  --seeds 300101 300102 --iterations 1 --bootstrap-repeats 100 \
+  --mlflow-uri "file://$(pwd)/mlruns" \
+  --mlflow-experiment MedReconLab-CT
+
+mlflow ui --backend-store-uri "file://$(pwd)/mlruns"
+```
+
+Open the MLflow UI at `http://127.0.0.1:5000`. The training run logs
+per-epoch train/validation MAE and learning rate, best validation MAE and
+selected epoch. The sweep run logs method-level mean PSNR, SSIM, RMSE,
+number of synthetic cases and reproducible generated reports. The CLI
+manifest includes the MLflow run ID when tracking is enabled. Failed remote
+tracking requests are reported rather than silently ignored. This initial
+integration is *experiment tracking only*, not model registry, remote job
+scheduling or clinical dataset handling.
