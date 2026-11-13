@@ -1,0 +1,101 @@
+name: MedReconLab CPU CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-cpu:
+    name: Classical reconstruction and API (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install core and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Essential lint checks
+        run: ruff check --select E4,E7,E9,F src tests dashboard
+      - name: Run classical reconstruction and API tests
+        run: pytest -q -ra tests/test_core.py tests/test_api.py
+      - name: End-to-end CT demo
+        run: medrecon-demo --modality ct --size 32 --output outputs/smoke
+
+  physics-cpu:
+    name: PyTorch physics-informed operators (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU-only PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project, tests and physics extras
+        run: python -m pip install -e ".[dev,physics]"
+      - name: Verify PyTorch CPU dependency
+        run: |
+          python -c "import torch; print('PyTorch:', torch.__version__); assert torch.tensor([1.0], device='cpu').device.type == 'cpu'"
+      - name: Run differentiable CT and MRI physics tests
+        run: pytest -v -rs tests/test_core.py -k test_torch
+      - name: U-Net training, data and checkpoint tests
+        run: pytest -q -rs tests/test_unet.py
+      - name: CT benchmark statistical integrity tests
+        run: pytest -q -rs tests/test_ct_sweep.py
+      - name: Synthetic CT projection/noise sweep smoke test
+        run: |
+          medrecon-ct-sweep --output outputs/ci_ct_sweep --size 32 --projections 16 24 --angle-spans 120 180 --noise-levels 0 .01 --seeds 300101 300102 --iterations 1 --bootstrap-repeats 100
+      - name: Reproducible synthetic CT training smoke test
+        run: |
+          medrecon-train-ct --output outputs/ci_unet --size 32 --projections 20 --train-cases 4 --val-cases 2 --test-cases 2 --epochs 2 --batch-size 2 --channels 4 --device cpu
+          medrecon-compare-ct --checkpoint outputs/ci_unet/best.pt --output outputs/ci_unet/benchmark --cases 2 --device cpu
+      - name: Archive real training metrics and figures
+        uses: actions/upload-artifact@v4
+        with:
+          name: medreconlab-unet-ct-smoke
+          path: |
+            outputs/ci_unet/history.csv
+            outputs/ci_unet/loss_curve.png
+            outputs/ci_unet/manifest.json
+            outputs/ci_unet/benchmark/
+            outputs/ci_ct_sweep/
+          if-no-files-found: error
+
+  tracking-cpu:
+    name: MLflow local experiment tracking (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MLflow tracking and tests
+        run: python -m pip install -e ".[dev,tracking]"
+      - name: Verify local MLflow logging and selective artifacts
+        run: pytest -q -rs tests/test_tracking.py
+
+  lodopab-cpu:
+    name: LoDoPaB-CT geometry and data contract (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install LoDoPaB-CT and test dependencies
+        run: python -m pip install -e ".[dev,lodopab]"
+      - name: Verify native geometry and benchmark exports with fixtures
+        run: pytest -p no:odl_plugins -q tests/test_lodopab.py
