@@ -247,3 +247,31 @@ For a responsible research-paper pathway, read
 [`docs/research_protocol.md`](docs/research_protocol.md). The protocol
 separates existing synthetic engineering results from external patient-level
 validation required for stronger scientific claims.
+
+## LoDoPaB-CT native-geometry baselines
+
+Download the split archives you plan to evaluate and all three
+`patient_ids_rand_*.csv` files from [LoDoPaB-CT on Zenodo](https://zenodo.org/records/3384092).
+Extract the HDF5 shards into the same directory as the CSV files. The CLI reads
+the requested rows from local files. For a small pilot, it only needs the
+observation and ground-truth shards containing the selected indices.
+
+```bash
+pip install -e ".[lodopab]"
+medrecon-lodopab --root data/lodopab --output outputs/lodopab_pilot \
+  --split validation --indices 0 1 2 --cgls-iterations 5
+```
+
+The benchmark uses the published 1,000-angle, 513-detector geometry and the
+released normalized post-log measurements. FBP uses a full-band Ram-Lak filter.
+Optional CGLS starts at zero and uses the same ODL/ASTRA projector and adjoint.
+PSNR and SSIM use the reference slice's intensity range. Output includes
+`per_slice.csv`, `per_patient.csv`, `summary.csv` with both slice- and
+patient-weighted averages, and `manifest.json` with the indices, geometry,
+backend and library versions. Reconstruction timings include first-call
+overhead and exclude file I/O and metric computation.
+
+Set the CGLS iteration budget on validation data. For the final offline
+evaluation, use the frozen budget with `--split test --all`. This workflow
+covers full-angle low-dose data. Sparse-view experiments require a separate
+angular selection protocol and a corresponding forward operator.

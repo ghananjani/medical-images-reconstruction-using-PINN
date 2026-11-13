@@ -82,3 +82,20 @@ jobs:
         run: python -m pip install -e ".[dev,tracking]"
       - name: Verify local MLflow logging and selective artifacts
         run: pytest -q -rs tests/test_tracking.py
+
+  lodopab-cpu:
+    name: LoDoPaB-CT geometry and data contract (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install LoDoPaB-CT and test dependencies
+        run: python -m pip install -e ".[dev,lodopab]"
+      - name: Verify native geometry and benchmark exports with fixtures
+        run: pytest -p no:odl_plugins -q tests/test_lodopab.py

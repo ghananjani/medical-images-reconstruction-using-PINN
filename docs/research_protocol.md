@@ -23,8 +23,8 @@ Do not present pixel optimization or a learned postprocessor as a PDE-based PINN
 
 | Category | Method | Status | Required publication evidence |
 |---|---|---|---|
-| Analytic | FBP | Implemented | Acquisition-matched reference |
-| Iterative | SART | Implemented | Same sinogram, iterations, residual |
+| Analytic | FBP | Synthetic and native LoDoPaB-CT implementations | Full held-out benchmark |
+| Iterative | SART / CGLS | SART on phantoms, CGLS with the native LoDoPaB-CT projector | Validation-selected iteration budget and full test results |
 | Supervised | CT U-Net | Implemented, tiny CI training only | Full training, independent test sets |
 | Physics-guided | Differentiable CT image optimization | Implemented on its own approximate operator | Operator agreement study, converged experiments |
 | Regularization | TV / convex reconstruction | Not implemented | Real optimization baseline |
@@ -36,8 +36,11 @@ Do not present pixel optimization or a learned postprocessor as a PDE-based PINN
    not independent human patients and do not justify clinical conclusions.
 2. **External benchmark:** LoDoPaB-CT, using its specified split and patient IDs.
    It provides simulated low-dose measurements derived from CT patient scans.
-   Keep the official acquisition operator, normalization and geometry intact
-   instead of implying the existing scikit-image circle Radon pipeline is compatible.
+   The external benchmark CLI reads native HDF5 measurements and checks all three
+   published patient split mappings. It uses the LoDoPaB-CT discretization with
+   ODL/ASTRA and exports both slice- and patient-weighted summaries.
+   Start with full-angle low-dose measurements. For sparse-view runs, record the
+   selected angle indices and use a projector matched to exactly those angles.
 3. **Optional second dataset:** AAPM Low Dose CT public image/projection resources,
    after verifying dataset access and permitted uses; preserve patient-level splits.
 
