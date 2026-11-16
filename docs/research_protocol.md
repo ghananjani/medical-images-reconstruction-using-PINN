@@ -39,7 +39,10 @@ Do not present pixel optimization or a learned postprocessor as a PDE-based PINN
    The external benchmark CLI reads native HDF5 measurements and checks all three
    published patient split mappings. It uses the LoDoPaB-CT discretization with
    ODL/ASTRA and exports both slice- and patient-weighted summaries.
-   Start with full-angle low-dose measurements. For sparse-view runs, record the
+   Start with full-angle low-dose measurements. Sweep CGLS iteration counts on
+   the validation split, maximizing mean PSNR after first averaging within each
+   patient. Freeze the budget before test evaluation. Use paired patient
+   bootstrap intervals for comparisons against FBP. For sparse-view runs, record the
    selected angle indices and use a projector matched to exactly those angles.
 3. **Optional second dataset:** AAPM Low Dose CT public image/projection resources,
    after verifying dataset access and permitted uses; preserve patient-level splits.

@@ -271,7 +271,18 @@ patient-weighted averages, and `manifest.json` with the indices, geometry,
 backend and library versions. Reconstruction timings include first-call
 overhead and exclude file I/O and metric computation.
 
-Set the CGLS iteration budget on validation data. For the final offline
-evaluation, use the frozen budget with `--split test --all`. This workflow
+Choose a CGLS iteration budget by sweeping the official validation split:
+
+```bash
+medrecon-lodopab --root data/lodopab --output outputs/lodopab_validation \
+  --split validation --all --validation-iterations 1 2 3 5 8 12 16 24 32
+```
+
+The sweep checkpoints a single CGLS solve at each requested iteration count.
+`selection.json` records the budget with the highest patient-weighted mean
+PSNR, using fewer iterations to break exact ties. Comparative runs export
+`paired_vs_fbp.csv` with mean differences and 95% percentile bootstrap intervals
+over paired patient averages. Use the selected budget with
+`--split test --all --cgls-iterations` for final offline evaluation. This workflow
 covers full-angle low-dose data. Sparse-view experiments require a separate
 angular selection protocol and a corresponding forward operator.

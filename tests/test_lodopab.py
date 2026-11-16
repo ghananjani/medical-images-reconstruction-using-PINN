@@ -64,3 +64,55 @@ def test_native_geometry_and_benchmark(tmp_path, monkeypatch):
     manifest = json.loads((tmp_path / "output" / "manifest.json").read_text())
     assert manifest["indices"] == [0]
     assert manifest["backend"] == "astra_cpu"
+
+
+def test_validation_sweep_and_patient_pairing(tmp_path, monkeypatch):
+    import pandas as pd
+
+    pytest.importorskip("odl")
+    pytest.importorskip("astra")
+    ray = lodopab.make_ray_transform()
+    reference = np.zeros(lodopab.IMAGE_SHAPE, dtype=np.float32)
+    reference[145:215, 185:240] = 0.5
+    observation = np.asarray(ray(reference))
+    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {"validation": [632, 633]})
+    monkeypatch.setattr(lodopab, "load_pair", lambda *_: (observation, reference))
+
+    with pytest.raises(ValueError, match="requires the validation split"):
+        lodopab.benchmark(tmp_path, tmp_path, indices=[0], validation_iterations=[1, 2])
+
+    output = tmp_path / "sweep"
+    frame = lodopab.benchmark(
+        tmp_path, output, split="validation", indices=[0, 1], validation_iterations=[2, 1],
+    )
+    assert list(frame["method"].unique()) == ["fbp", "cgls_1", "cgls_2"]
+    fixed = lodopab.benchmark(
+        tmp_path, tmp_path / "fixed", split="validation", indices=[0], cgls_iterations=2,
+    )
+    assert frame.loc[2, "psnr"] == pytest.approx(fixed.loc[1, "psnr"])
+    selection = json.loads((output / "selection.json").read_text())
+    candidate_scores = frame[frame["method"] != "fbp"].groupby("method").psnr.mean()
+    assert selection["selected_iterations"] == int(candidate_scores.idxmax().split("_")[1])
+    assert selection["n_patients"] == 2
+    paired = pd.read_csv(output / "paired_vs_fbp.csv")
+    assert (paired["n_patients"] == 2).all()
+    np.testing.assert_allclose(paired["mean_delta"], paired["ci95_low"])
+    np.testing.assert_allclose(paired["mean_delta"], paired["ci95_high"])
+
+
+def test_patient_bootstrap_weights_each_patient_equally():
+    import pandas as pd
+
+    metrics = ["psnr", "ssim", "relative_l2_residual"]
+    patients = pd.DataFrame(
+        [[1, 1, 1], [8, 8, 8], [4, 4, 4], [7, 7, 7]],
+        index=pd.MultiIndex.from_tuples(
+            [("fbp", 1), ("fbp", 2), ("cgls", 1), ("cgls", 2)],
+            names=["method", "patient_id"],
+        ),
+        columns=metrics,
+    )
+    result = lodopab._paired_patient_deltas(patients)
+    np.testing.assert_allclose(result["mean_delta"], 1)
+    np.testing.assert_allclose(result["ci95_low"], -1)
+    np.testing.assert_allclose(result["ci95_high"], 3)
