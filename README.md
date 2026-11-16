@@ -253,9 +253,11 @@ validation required for stronger scientific claims.
 Download the observation and ground-truth ZIP files for your split and all
 three `patient_ids_rand_*.csv` files from [LoDoPaB-CT on Zenodo](https://zenodo.org/records/3384092).
 For the validation split, place the five downloads in `data/lodopab/downloads`
-and run:
+and run the commands below. The downloader resumes interrupted transfers when
+rerun, and staging verifies the official checksums.
 
 ```bash
+python scripts/download_lodopab.py --downloads data/lodopab/downloads
 python scripts/stage_lodopab.py --downloads data/lodopab/downloads \
   --output data/lodopab --split validation
 ```
