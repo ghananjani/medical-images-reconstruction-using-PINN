@@ -271,6 +271,18 @@ patient-weighted averages, and `manifest.json` with the indices, geometry,
 backend and library versions. Reconstruction timings include first-call
 overhead and exclude file I/O and metric computation.
 
+Before starting the full validation sweep, check the local input files:
+
+```bash
+medrecon-lodopab --root data/lodopab --split validation --all --check-data
+```
+
+This command checks the patient mappings and expected HDF5 dataset headers,
+lists missing or malformed shards, and exits with status 1 when any are found.
+Use the same command with `--split test` to check held-out inputs. The check
+does not read image arrays, so it does not replace per-slice validation during
+reconstruction.
+
 Choose a CGLS iteration budget by sweeping the official validation split:
 
 ```bash

@@ -216,3 +216,48 @@ def test_benchmark_resume_regenerates_full_validation_outputs(tmp_path, monkeypa
         with pytest.raises(ValueError, match="Validation selection"):
             lodopab.benchmark(tmp_path, tmp_path / "invalid", frozen_selection=invalid)
     assert calls == [0, 1, 1, 0]
+
+
+def test_check_data_reports_partial_coverage_and_malformed_shards(tmp_path, monkeypatch):
+    monkeypatch.setitem(lodopab.SPLIT_SIZES, "validation", 3)
+    monkeypatch.setattr(lodopab, "ROWS_PER_SHARD", 2)
+    monkeypatch.setattr(lodopab, "IMAGE_SHAPE", (2, 2))
+    monkeypatch.setattr(lodopab, "OBSERVATION_SHAPE", (3, 2))
+    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {"validation": [632, 633, 632]})
+
+    def shard(kind, number, shape):
+        with h5py.File(tmp_path / f"{kind}_validation_{number:03d}.hdf5", "w") as handle:
+            handle.create_dataset("data", shape=shape, dtype="f4")
+
+    shard("observation", 0, (2, 3, 2))
+    shard("ground_truth", 0, (2, 2, 2))
+    shard("observation", 1, (1, 2, 3))
+    report = lodopab.check_data(tmp_path, "validation")
+    assert not report["ready"]
+    assert report["slices_with_matching_shard_headers"] == 2
+    assert report["requested_patients"] == 2
+    assert len(report["errors"]) == 2
+    assert lodopab.check_data(tmp_path, "validation", [1])["ready"]
+
+    shard("observation", 1, (1, 3, 2))
+    shard("ground_truth", 1, (2, 2, 2))
+    report = lodopab.check_data(tmp_path, "validation")
+    assert report["ready"]
+    assert report["scope"] == "full_split"
+    assert report["slices_with_matching_shard_headers"] == 3
+
+
+def test_check_data_cli_fails_without_dataset(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", [
+        "medrecon-lodopab", "--root", str(tmp_path), "--split", "validation",
+        "--all", "--check-data",
+    ])
+    with pytest.raises(SystemExit) as exit_info:
+        lodopab.main()
+    assert exit_info.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert not report["ready"]
+    assert report["requested_slices"] == 3522
+    assert report["required_shard_pairs"] == 28
+    assert report["matching_shard_pairs"] == 0
+    assert report["requested_patients"] is None

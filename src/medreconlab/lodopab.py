@@ -37,19 +37,75 @@ def load_patient_ids(root: Path) -> dict[str, np.ndarray]:
     return ids_by_split
 
 
+def _check_shard_layout(path: Path, data, valid_rows: int, shape: tuple[int, int],
+                        allow_padding: bool) -> None:
+    allowed_rows = {valid_rows, ROWS_PER_SHARD} if allow_padding else {valid_rows}
+    if data.ndim != 3 or data.shape[1:] != shape or data.shape[0] not in allowed_rows:
+        raise ValueError(f"{path.name} has unexpected data shape {data.shape}")
+
+
 def _read_shard_row(path: Path, row: int, valid_rows: int, shape: tuple[int, int],
                     allow_padding: bool = False) -> np.ndarray:
     import h5py
 
     with h5py.File(path, "r") as shard:
         data = shard["data"]
-        allowed_rows = {valid_rows, ROWS_PER_SHARD} if allow_padding else {valid_rows}
-        if data.shape[1:] != shape or data.shape[0] not in allowed_rows:
-            raise ValueError(f"{path.name} has unexpected data shape {data.shape}")
+        _check_shard_layout(path, data, valid_rows, shape, allow_padding)
         array = np.asarray(data[row], dtype=np.float32)
     if not np.isfinite(array).all():
         raise ValueError(f"{path.name}, row {row}, contains non-finite values")
     return array
+
+
+def check_data(root: Path, split: str, indices: list[int] | None = None) -> dict:
+    """Report data coverage using patient mappings and shard metadata only."""
+    import h5py
+
+    selected = _selected_indices(split, indices)
+    errors = []
+    patients = None
+    try:
+        ids = load_patient_ids(root)[split]
+        patients = len(set(ids[index] for index in selected))
+    except (OSError, ValueError) as error:
+        errors.append(f"Patient mappings: {error}")
+
+    shards = sorted({index // ROWS_PER_SHARD for index in selected})
+    usable = set()
+    for number in shards:
+        valid_rows = min(ROWS_PER_SHARD, SPLIT_SIZES[split] - number * ROWS_PER_SHARD)
+        errors_before = len(errors)
+        for kind, shape in (("observation", OBSERVATION_SHAPE), ("ground_truth", IMAGE_SHAPE)):
+            path = root / f"{kind}_{split}_{number:03d}.hdf5"
+            if not path.is_file():
+                errors.append(f"Missing {path.name}")
+                continue
+            try:
+                with h5py.File(path, "r") as shard:
+                    data = shard.get("data")
+                    if not isinstance(data, h5py.Dataset):
+                        raise ValueError("expected a dataset named data")
+                    _check_shard_layout(path, data, valid_rows, shape, kind == "ground_truth")
+                    if data.dtype.kind != "f":
+                        raise ValueError(f"expected floating point data, found {data.dtype}")
+            except (OSError, ValueError) as error:
+                errors.append(f"{path.name}: {error}")
+        if len(errors) == errors_before:
+            usable.add(number)
+
+    return {
+        "split": split,
+        "scope": "full_split" if len(selected) == SPLIT_SIZES[split] else "subset",
+        "requested_slices": len(selected),
+        "slices_with_matching_shard_headers": sum(
+            index // ROWS_PER_SHARD in usable for index in selected
+        ),
+        "requested_patients": patients,
+        "required_shard_pairs": len(shards),
+        "matching_shard_pairs": len(usable),
+        "ready": not errors,
+        "errors": errors,
+    }
 
 
 def load_pair(root: Path, split: str, index: int) -> tuple[np.ndarray, np.ndarray]:
@@ -170,6 +226,16 @@ def load_frozen_selection(path: Path, validation_ids: np.ndarray, backend: str) 
     return {"sha256": sha256(raw).hexdigest(), "record": record}
 
 
+def _selected_indices(split: str, indices: list[int] | None) -> range | list[int]:
+    count = SPLIT_SIZES[split]
+    selected = range(count) if indices is None else indices
+    if not selected or len(set(selected)) != len(selected) or not all(
+        0 <= index < count for index in selected
+    ):
+        raise ValueError(f"{split} indices must be unique and within [0, {count - 1}]")
+    return selected
+
+
 def benchmark(root: Path, output: Path, split: str = "test",
               indices: list[int] | None = None, cgls_iterations: int = 0,
               backend: str = "astra_cpu", *,
@@ -187,11 +253,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
         if not budgets or budgets[0] < 1 or len(set(budgets)) != len(budgets):
             raise ValueError("Validation iteration budgets must be positive and unique")
     count = SPLIT_SIZES[split]
-    selected = range(count) if indices is None else indices
-    if not selected or len(set(selected)) != len(selected) or not all(
-        0 <= index < count for index in selected
-    ):
-        raise ValueError(f"{split} indices must be unique and within [0, {count - 1}]")
+    selected = _selected_indices(split, indices)
     if frozen_selection is not None and (
         split != "test" or len(selected) != count or cgls_iterations or validation_iterations is not None
     ):
@@ -340,7 +402,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True, help="Extracted LoDoPaB-CT files")
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--split", choices=SPLIT_SIZES, default="test")
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--indices", nargs="+", type=int, help="Zero-based official slice indices")
@@ -362,7 +424,17 @@ def main():
     )
     parser.add_argument("--resume", action="store_true",
                         help="Save completed slices and reuse them on an identical rerun")
+    parser.add_argument(
+        "--check-data", action="store_true",
+        help="Report patient mapping and HDF5 shard readiness without reconstructing",
+    )
     args = parser.parse_args()
+    if args.check_data:
+        readiness = check_data(args.root, args.split, args.indices)
+        print(json.dumps(readiness, indent=2))
+        raise SystemExit(0 if readiness["ready"] else 1)
+    if args.output is None:
+        parser.error("--output is required for a benchmark run")
     frame = benchmark(
         args.root, args.output, args.split, args.indices, args.cgls_iterations, args.backend,
         validation_iterations=args.validation_iterations,
