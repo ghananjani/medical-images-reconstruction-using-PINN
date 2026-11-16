@@ -311,7 +311,10 @@ used to freeze the paper's CGLS setting.
 
 The sweep records intermediate reconstructions from a single CGLS solve.
 `selection.json` records the budget with the highest patient-weighted mean
-PSNR, using fewer iterations to break exact ties. Comparative runs export
+PSNR, using fewer iterations to break exact ties. `validation_sensitivity.csv` shows
+which budget wins when each validation patient is left out in turn. This
+diagnostic uses validation data and leaves the main selection rule unchanged.
+Comparative runs export
 `paired_vs_fbp.csv` with mean differences and 95% percentile bootstrap intervals
 over paired patient averages. Use the completed validation selection directly
 for final offline evaluation:

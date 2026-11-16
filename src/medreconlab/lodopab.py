@@ -188,6 +188,28 @@ def _paired_patient_deltas(per_patient: pd.DataFrame, baseline: str = "fbp") -> 
     return pd.DataFrame(rows)
 
 
+def _validation_sensitivity(per_patient: pd.DataFrame, budgets: list[int]) -> pd.DataFrame:
+    """Re-select the CGLS budget after excluding each validation patient."""
+    methods = [f"cgls_{budget}" for budget in sorted(budgets)]
+    scores = per_patient["psnr"].unstack("method").loc[:, methods]
+    values = scores.to_numpy()
+    rows = []
+    for i, patient_id in enumerate(scores.index):
+        retained = np.delete(values, i, axis=0)
+        if retained.size and np.isfinite(retained).all():
+            means = retained.mean(axis=0)
+            winner = int(means.argmax())
+            rows.append({
+                "excluded_patient_id": int(patient_id),
+                "n_patients": len(retained),
+                "selected_iterations": int(methods[winner].split("_")[1]),
+                "selected_score": float(means[winner]),
+            })
+    return pd.DataFrame(rows, columns=[
+        "excluded_patient_id", "n_patients", "selected_iterations", "selected_score",
+    ])
+
+
 def _patient_mapping_digest(ids: np.ndarray) -> str:
     return sha256(np.asarray(ids, dtype="<i8").tobytes()).hexdigest()
 
@@ -399,10 +421,14 @@ def benchmark(root: Path, output: Path, split: str = "test",
     per_patient.to_csv(output / "per_patient.csv")
     summary.to_csv(output / "summary.csv")
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    sensitivity_path = output / "validation_sensitivity.csv"
     if selection is not None:
+        _validation_sensitivity(per_patient, budgets).to_csv(sensitivity_path, index=False)
         temporary = output / "selection.json.tmp"
         temporary.write_text(json.dumps(selection, indent=2) + "\n")
         temporary.replace(output / "selection.json")
+    else:
+        sensitivity_path.unlink(missing_ok=True)
     return frame
 
 

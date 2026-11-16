@@ -269,3 +269,21 @@ def test_check_data_cli_fails_without_dataset(tmp_path, monkeypatch, capsys):
     assert report["required_shard_pairs"] == 28
     assert report["matching_shard_pairs"] == 0
     assert report["requested_patients"] is None
+
+
+def test_validation_sensitivity_reselects_and_breaks_ties():
+    import pandas as pd
+
+    scores = pd.DataFrame(
+        {"cgls_2": [30.0, 30.0, 29.0], "cgls_4": [32.0, 29.0, 28.0]},
+        index=pd.Index([632, 633, 634], name="patient_id"),
+    ).rename_axis("method", axis=1)
+    per_patient = scores.stack().rename("psnr").to_frame().swaplevel()
+    result = lodopab._validation_sensitivity(per_patient, [4, 2])
+    assert result["excluded_patient_id"].tolist() == [632, 633, 634]
+    assert result["selected_iterations"].tolist() == [2, 4, 4]
+    assert result["n_patients"].tolist() == [2, 2, 2]
+    tied = per_patient.assign(psnr=30.0)
+    assert lodopab._validation_sensitivity(tied, [4, 2])["selected_iterations"].tolist() == [2, 2, 2]
+    single = per_patient.loc[pd.IndexSlice[:, [632]], :]
+    assert lodopab._validation_sensitivity(single, [4, 2]).empty
