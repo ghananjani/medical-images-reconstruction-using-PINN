@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from .lodopab_progress import collect_slices
 from .metrics import evaluate
 
 DATASET_DOI = "10.5281/zenodo.3384092"
@@ -133,7 +135,8 @@ def benchmark(root: Path, output: Path, split: str = "test",
               indices: list[int] | None = None, cgls_iterations: int = 0,
               backend: str = "astra_cpu", *,
               validation_iterations: list[int] | None = None,
-              reference_checkpoint: Path | None = None) -> pd.DataFrame:
+              reference_checkpoint: Path | None = None,
+              resume: bool = False) -> pd.DataFrame:
     """Compare native FBP and optional zero-initialized CGLS on matched slices."""
     import odl
 
@@ -163,8 +166,46 @@ def benchmark(root: Path, output: Path, split: str = "test",
         reference_methods, reference_metadata = load_reference(ray, reference_checkpoint)
         methods.update(reference_methods)
 
-    rows = []
-    for index in selected:
+    manifest = {
+        "dataset_doi": DATASET_DOI,
+        "split": split,
+        "indices": list(selected),
+        "image_shape": IMAGE_SHAPE,
+        "sinogram_shape_angle_detector": OBSERVATION_SHAPE,
+        "image_bounds_m": [-HALF_FIELD_M, HALF_FIELD_M],
+        "detector_bounds_m": [float(ray.geometry.det_partition.min_pt[0]),
+                              float(ray.geometry.det_partition.max_pt[0])],
+        "angle_bounds_rad": [0, float(np.pi)],
+        "backend": backend,
+        "versions": {name: version(name) for name in (
+            "medreconlab", "odl", "astra-toolbox", "numpy", "scikit-image", "h5py"
+        )},
+        "fbp_filter": "Ram-Lak",
+        "fbp_frequency_scaling": 1.0,
+        "cgls_iterations": cgls_iterations,
+        "validation_iterations": budgets,
+        "reference_reconstructors": reference_metadata,
+        "paired_bootstrap": {"unit": "patient", "resamples": 2000, "seed": 11},
+        "data_range": "per-reference max minus min",
+        "ssim_window": 7,
+        "timing": "reconstruction only, includes first-call overhead",
+    }
+
+    complete_split = len(selected) == count
+    manifest["scope"] = "full_split" if complete_split else "subset"
+    manifest["n_slices"] = len(selected)
+    manifest["n_patients"] = len(set(ids[index] for index in selected))
+    manifest["patient_mapping_sha256"] = sha256(np.asarray(ids, dtype="<i8").tobytes()).hexdigest()
+    checkpoint = output / "progress.sqlite"
+    if resume:
+        output.mkdir(parents=True, exist_ok=True)
+        if not checkpoint.exists() and (output / "manifest.json").exists():
+            raise ValueError("Existing output has no checkpoint. Use a new output directory.")
+    elif checkpoint.exists():
+        raise ValueError("This output has a checkpoint. Use --resume or a new output directory.")
+
+    def evaluate_slice(index):
+        rows = []
         observation, reference = load_pair(root, split, index)
         measurement = ray.range.element(observation)
         data_range = float(np.ptp(reference))
@@ -191,6 +232,10 @@ def benchmark(root: Path, output: Path, split: str = "test",
                 "reconstruction_s": elapsed,
             })
 
+        return rows
+
+    configuration = {**manifest, "dataset_root": str(root.resolve()), "checkpoint_schema": 1}
+    rows = collect_slices(selected, evaluate_slice, checkpoint if resume else None, configuration)
     frame = pd.DataFrame(rows)
     metric_names = ["psnr", "ssim", "mae", "rmse", "relative_l2_residual", "reconstruction_s"]
     per_patient = frame.groupby(["method", "patient_id"])[metric_names].mean()
@@ -210,6 +255,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
         chosen = max(budgets, key=lambda budget: (summary.loc[f"cgls_{budget}", criterion], -budget))
         (output / "selection.json").write_text(json.dumps({
             "split": split,
+            "scope": manifest["scope"],
             "criterion": criterion,
             "tie_break": "fewer iterations",
             "candidates": budgets,
@@ -223,30 +269,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
     frame.to_csv(output / "per_slice.csv", index=False)
     per_patient.to_csv(output / "per_patient.csv")
     summary.to_csv(output / "summary.csv")
-    (output / "manifest.json").write_text(json.dumps({
-        "dataset_doi": DATASET_DOI,
-        "split": split,
-        "indices": list(selected),
-        "image_shape": IMAGE_SHAPE,
-        "sinogram_shape_angle_detector": OBSERVATION_SHAPE,
-        "image_bounds_m": [-HALF_FIELD_M, HALF_FIELD_M],
-        "detector_bounds_m": [float(ray.geometry.det_partition.min_pt[0]),
-                              float(ray.geometry.det_partition.max_pt[0])],
-        "angle_bounds_rad": [0, float(np.pi)],
-        "backend": backend,
-        "versions": {name: version(name) for name in (
-            "medreconlab", "odl", "astra-toolbox", "numpy", "scikit-image", "h5py"
-        )},
-        "fbp_filter": "Ram-Lak",
-        "fbp_frequency_scaling": 1.0,
-        "cgls_iterations": cgls_iterations,
-        "validation_iterations": budgets,
-        "reference_reconstructors": reference_metadata,
-        "paired_bootstrap": {"unit": "patient", "resamples": 2000, "seed": 11},
-        "data_range": "per-reference max minus min",
-        "ssim_window": 7,
-        "timing": "reconstruction only, includes first-call overhead",
-    }, indent=2) + "\n")
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return frame
 
 
@@ -269,11 +292,14 @@ def main():
         "--reference-checkpoint", type=Path,
         help="Add DIVαℓ tuned Hann FBP and the published LoDoPaB FBP+U-Net",
     )
+    parser.add_argument("--resume", action="store_true",
+                        help="Save completed slices and reuse them on an identical rerun")
     args = parser.parse_args()
     frame = benchmark(
         args.root, args.output, args.split, args.indices, args.cgls_iterations, args.backend,
         validation_iterations=args.validation_iterations,
         reference_checkpoint=args.reference_checkpoint,
+        resume=args.resume,
     )
     print(frame.groupby("method")[["psnr", "ssim", "reconstruction_s"]].mean())
 

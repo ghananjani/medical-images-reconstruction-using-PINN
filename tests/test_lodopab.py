@@ -94,6 +94,7 @@ def test_validation_sweep_and_patient_pairing(tmp_path, monkeypatch):
     candidate_scores = frame[frame["method"] != "fbp"].groupby("method").psnr.mean()
     assert selection["selected_iterations"] == int(candidate_scores.idxmax().split("_")[1])
     assert selection["n_patients"] == 2
+    assert selection["scope"] == "subset"
     paired = pd.read_csv(output / "paired_vs_fbp.csv")
     assert (paired["n_patients"] == 2).all()
     np.testing.assert_allclose(paired["mean_delta"], paired["ci95_low"])
@@ -155,3 +156,38 @@ def test_reference_methods_enter_matched_benchmark(tmp_path, monkeypatch):
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["reference_reconstructors"] == metadata
     assert (tmp_path / "paired_vs_fbp.csv").is_file()
+
+
+
+def test_benchmark_resume_regenerates_full_validation_outputs(tmp_path, monkeypatch):
+    pytest.importorskip("odl")
+    pytest.importorskip("astra")
+    monkeypatch.setitem(lodopab.SPLIT_SIZES, "validation", 2)
+    ray = lodopab.make_ray_transform()
+    image = np.zeros(lodopab.IMAGE_SHAPE, dtype=np.float32)
+    image[145:215, 185:240] = 0.5
+    observation = np.asarray(ray(image))
+    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {"validation": [632, 633]})
+    calls = []
+
+    def load_pair(root, split, index):
+        calls.append(index)
+        if calls == [0, 1]:
+            raise InterruptedError
+        return observation, image
+
+    monkeypatch.setattr(lodopab, "load_pair", load_pair)
+    output = tmp_path / "output"
+    settings = dict(split="validation", validation_iterations=[1], resume=True)
+    with pytest.raises(InterruptedError):
+        lodopab.benchmark(tmp_path, output, **settings)
+    assert not (output / "selection.json").exists()
+    result = lodopab.benchmark(tmp_path, output, **settings)
+    assert calls == [0, 1, 1]
+    assert len(result) == 4
+    selection = json.loads((output / "selection.json").read_text())
+    assert selection["scope"] == "full_split"
+    assert selection["n_slices"] == selection["n_patients"] == 2
+    with pytest.raises(ValueError, match="Checkpoint settings differ"):
+        lodopab.benchmark(tmp_path, output, **{**settings, "validation_iterations": [2]})
+    assert calls == [0, 1, 1]

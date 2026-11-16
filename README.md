@@ -275,10 +275,18 @@ Choose a CGLS iteration budget by sweeping the official validation split:
 
 ```bash
 medrecon-lodopab --root data/lodopab --output outputs/lodopab_validation \
-  --split validation --all --validation-iterations 1 2 3 5 8 12 16 24 32
+  --split validation --all --validation-iterations 1 2 3 5 8 12 16 24 32 --resume
 ```
 
-The sweep checkpoints a single CGLS solve at each requested iteration count.
+With `--resume`, each completed slice is committed to a local
+`progress.sqlite` file. After an interruption, repeat the same command.
+A change to the selected indices, settings, software versions, or patient
+mapping requires a new output directory. Keep the extracted source data
+unchanged between runs. The final manifest and selection label coverage as
+`full_split` or `subset`. Only a full official validation selection should be
+used to freeze the paper's CGLS setting.
+
+The sweep records intermediate reconstructions from a single CGLS solve.
 `selection.json` records the budget with the highest patient-weighted mean
 PSNR, using fewer iterations to break exact ties. Comparative runs export
 `paired_vs_fbp.csv` with mean differences and 95% percentile bootstrap intervals
