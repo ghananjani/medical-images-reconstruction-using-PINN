@@ -250,11 +250,20 @@ validation required for stronger scientific claims.
 
 ## LoDoPaB-CT native-geometry baselines
 
-Download the split archives you plan to evaluate and all three
-`patient_ids_rand_*.csv` files from [LoDoPaB-CT on Zenodo](https://zenodo.org/records/3384092).
-Extract the HDF5 shards into the same directory as the CSV files. The CLI reads
-the requested rows from local files. For a small pilot, it only needs the
-observation and ground-truth shards containing the selected indices.
+Download the observation and ground-truth ZIP files for your split and all
+three `patient_ids_rand_*.csv` files from [LoDoPaB-CT on Zenodo](https://zenodo.org/records/3384092).
+For the validation split, place the five downloads in `data/lodopab/downloads`
+and run:
+
+```bash
+python scripts/stage_lodopab.py --downloads data/lodopab/downloads \
+  --output data/lodopab --split validation
+```
+
+Staging verifies the release checksums and extracts the expected HDF5 files.
+The same script accepts `--split test`. Keep space for both the ZIP files and
+their extracted contents. For a small pilot, the benchmark can also read
+manually extracted shard pairs containing the selected indices.
 
 ```bash
 pip install -e ".[lodopab]"
