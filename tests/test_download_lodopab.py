@@ -22,11 +22,9 @@ class DownloadTests(unittest.TestCase):
             first = Response(b"abc", 206, {"Content-Range": "bytes 0-5/6"})
             second = Response(b"def", 206, {"Content-Range": "bytes 3-5/6"})
             with patch.object(download_lodopab.urllib.request, "urlopen",
-                              side_effect=[first, second]) as urlopen:
-                with self.assertRaisesRegex(OSError, "Incomplete"):
-                    download_lodopab.download_file(path, 6)
-                self.assertEqual(path.read_bytes(), b"abc")
+                              side_effect=[first, second]) as urlopen, patch.object(download_lodopab.time, "sleep") as sleep:
                 download_lodopab.download_file(path, 6)
+                sleep.assert_called_once_with(1)
                 self.assertEqual(urlopen.call_args.args[0].get_header("Range"), "bytes=3-5")
                 download_lodopab.download_file(path, 6)
                 self.assertEqual(urlopen.call_count, 2)
@@ -44,3 +42,21 @@ class DownloadTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         download_lodopab.download_file(path, 6)
                 self.assertEqual(path.read_bytes(), b"abc")
+
+
+    def test_bounded_ranges_preserve_archive_order(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "fixture.zip"
+            responses = [
+                Response(b"abc", 206, {"Content-Range": "bytes 0-2/6"}),
+                Response(b"def", 206, {"Content-Range": "bytes 3-5/6"}),
+            ]
+            with (
+                patch.object(download_lodopab, "CHUNK_BYTES", 3),
+                patch.object(download_lodopab.urllib.request, "urlopen",
+                             side_effect=responses) as urlopen,
+            ):
+                download_lodopab.download_file(path, 6)
+            self.assertEqual(path.read_bytes(), b"abcdef")
+            self.assertEqual([c.args[0].get_header("Range") for c in urlopen.call_args_list],
+                             ["bytes=0-2", "bytes=3-5"])
