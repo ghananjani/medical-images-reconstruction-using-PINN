@@ -10,6 +10,8 @@ RELEASE = "https://zenodo.org/records/3384092/files"
 CHUNK_BYTES = 64 * 1024 * 1024
 RETRY_LIMIT = 4
 SIZES = {
+    "ground_truth_test.zip": 1582139537,
+    "observation_test.zip": 2996574366,
     "ground_truth_validation.zip": 1567086812,
     "observation_validation.zip": 2944573582,
     "patient_ids_rand_test.csv": 14212,
@@ -70,14 +72,18 @@ def download_file(path: Path, size: int, release: str = RELEASE) -> None:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--downloads", type=Path, required=True)
-    parser.add_argument(
-        "--file", choices=SIZES,
-        help="Download only this file; default downloads all validation inputs",
-    )
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--split", choices=("validation", "test"),
+                           help="Download one split (default: validation)")
+    selection.add_argument("--file", choices=SIZES, help="Download only this file")
     args = parser.parse_args()
     args.downloads.mkdir(parents=True, exist_ok=True)
+    split = args.split or "validation"
+    files = [args.file] if args.file else [
+        name for name in SIZES if name.endswith(".csv") or name.endswith(f"_{split}.zip")
+    ]
     try:
-        for name in [args.file] if args.file else SIZES:
+        for name in files:
             print(f"Downloading or reusing {name}", flush=True)
             download_file(args.downloads / name, SIZES[name])
     except (OSError, ValueError, http.client.HTTPException) as error:

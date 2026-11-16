@@ -60,3 +60,16 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), b"abcdef")
             self.assertEqual([c.args[0].get_header("Range") for c in urlopen.call_args_list],
                              ["bytes=0-2", "bytes=3-5"])
+
+
+    def test_test_split_downloads_archives_and_required_mappings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with (
+                patch("sys.argv", ["download_lodopab", "--downloads", temp, "--split", "test"]),
+                patch.object(download_lodopab, "download_file") as download,
+            ):
+                download_lodopab.main()
+            self.assertEqual({call.args[0].name for call in download.call_args_list}, {
+                "ground_truth_test.zip", "observation_test.zip", "patient_ids_rand_train.csv",
+                "patient_ids_rand_validation.csv", "patient_ids_rand_test.csv",
+            })

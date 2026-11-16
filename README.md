@@ -263,7 +263,7 @@ python scripts/stage_lodopab.py --downloads data/lodopab/downloads \
 ```
 
 Staging verifies the release checksums and extracts the expected HDF5 files.
-The same script accepts `--split test`. Keep space for both the ZIP files and
+Both scripts accept `--split test` to prepare the held-out inputs. Keep space for the ZIP files and
 their extracted contents. For a small pilot, the benchmark can also read
 manually extracted shard pairs containing the selected indices.
 
