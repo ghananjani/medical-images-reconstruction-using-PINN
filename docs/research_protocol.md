@@ -25,7 +25,7 @@ Do not present pixel optimization or a learned postprocessor as a PDE-based PINN
 |---|---|---|---|
 | Analytic | FBP | Synthetic and native LoDoPaB-CT implementations | Full held-out benchmark |
 | Iterative | SART / CGLS | SART on phantoms, CGLS with the native LoDoPaB-CT projector | Validation-selected iteration budget and full test results |
-| Supervised | CT U-Net | Implemented, tiny CI training only | Full training, independent test sets |
+| Supervised | CT U-Net / published DIVαℓ FBP+U-Net | Local U-Net on phantoms, published pretrained reference on LoDoPaB-CT | Matched full held-out test results |
 | Physics-guided | Differentiable CT image optimization | Implemented on its own approximate operator | Operator agreement study, converged experiments |
 | Regularization | TV / convex reconstruction | Not implemented | Real optimization baseline |
 | Advanced | Unrolled/Transformer/Diffusion | Not implemented | Actual code, model weights and controlled testing |

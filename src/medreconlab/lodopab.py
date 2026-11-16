@@ -132,7 +132,8 @@ def _paired_patient_deltas(per_patient: pd.DataFrame) -> pd.DataFrame:
 def benchmark(root: Path, output: Path, split: str = "test",
               indices: list[int] | None = None, cgls_iterations: int = 0,
               backend: str = "astra_cpu", *,
-              validation_iterations: list[int] | None = None) -> pd.DataFrame:
+              validation_iterations: list[int] | None = None,
+              reference_checkpoint: Path | None = None) -> pd.DataFrame:
     """Compare native FBP and optional zero-initialized CGLS on matched slices."""
     import odl
 
@@ -154,13 +155,24 @@ def benchmark(root: Path, output: Path, split: str = "test",
     ray = make_ray_transform(backend)
     fbp = odl.tomo.fbp_op(ray, filter_type="Ram-Lak", frequency_scaling=1.0)
 
+    methods = {"fbp": fbp}
+    reference_metadata = None
+    if reference_checkpoint is not None:
+        from .lodopab_reference import load_reference
+
+        reference_methods, reference_metadata = load_reference(ray, reference_checkpoint)
+        methods.update(reference_methods)
+
     rows = []
     for index in selected:
         observation, reference = load_pair(root, split, index)
         measurement = ray.range.element(observation)
         data_range = float(np.ptp(reference))
-        start = time.perf_counter()
-        predictions = [("fbp", np.asarray(fbp(measurement)), time.perf_counter() - start)]
+        predictions = []
+        for name, reconstruct in methods.items():
+            start = time.perf_counter()
+            prediction = np.asarray(reconstruct(measurement))
+            predictions.append((name, prediction, time.perf_counter() - start))
         if budgets:
             predictions.extend(_cgls_trace(ray, measurement, budgets))
         elif cgls_iterations:
@@ -191,7 +203,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
     output.mkdir(parents=True, exist_ok=True)
     if not budgets:
         (output / "selection.json").unlink(missing_ok=True)
-    if not (budgets or cgls_iterations):
+    if not (budgets or cgls_iterations or reference_checkpoint is not None):
         (output / "paired_vs_fbp.csv").unlink(missing_ok=True)
     if budgets:
         criterion = "psnr_patient_mean"
@@ -206,7 +218,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
             "n_slices": len(selected),
             "n_patients": int(summary.loc[f"cgls_{chosen}", "n_patients"]),
         }, indent=2) + "\n")
-    if budgets or cgls_iterations:
+    if budgets or cgls_iterations or reference_checkpoint is not None:
         _paired_patient_deltas(per_patient).to_csv(output / "paired_vs_fbp.csv", index=False)
     frame.to_csv(output / "per_slice.csv", index=False)
     per_patient.to_csv(output / "per_patient.csv")
@@ -229,6 +241,7 @@ def benchmark(root: Path, output: Path, split: str = "test",
         "fbp_frequency_scaling": 1.0,
         "cgls_iterations": cgls_iterations,
         "validation_iterations": budgets,
+        "reference_reconstructors": reference_metadata,
         "paired_bootstrap": {"unit": "patient", "resamples": 2000, "seed": 11},
         "data_range": "per-reference max minus min",
         "ssim_window": 7,
@@ -252,10 +265,15 @@ def main():
         help="Sweep CGLS budgets on the validation split and select by patient-weighted PSNR",
     )
     parser.add_argument("--backend", choices=("astra_cpu", "astra_cuda"), default="astra_cpu")
+    parser.add_argument(
+        "--reference-checkpoint", type=Path,
+        help="Add DIVαℓ tuned Hann FBP and the published LoDoPaB FBP+U-Net",
+    )
     args = parser.parse_args()
     frame = benchmark(
         args.root, args.output, args.split, args.indices, args.cgls_iterations, args.backend,
         validation_iterations=args.validation_iterations,
+        reference_checkpoint=args.reference_checkpoint,
     )
     print(frame.groupby("method")[["psnr", "ssim", "reconstruction_s"]].mean())
 

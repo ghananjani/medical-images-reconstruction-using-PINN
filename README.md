@@ -286,3 +286,23 @@ over paired patient averages. Use the selected budget with
 `--split test --all --cgls-iterations` for final offline evaluation. This workflow
 covers full-angle low-dose data. Sparse-view experiments require a separate
 angular selection protocol and a corresponding forward operator.
+
+### Published LoDoPaB-CT reference comparators
+
+The optional reference path adds DIVαℓ's tuned Hann FBP and pretrained
+FBP+U-Net. In an environment with the `lodopab` and `lodopab-reference`
+extras available, download the [released checkpoint](https://media.githubusercontent.com/media/jleuschn/supp.dival/6117cabc55d223f5b62ea43d4a40225270fb6756/reference_params/lodopab/lodopab_fbpunet.pt)
+to a local data directory and pass its path using `--reference-checkpoint`.
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 medrecon-lodopab \
+  --root data/lodopab --output outputs/lodopab_reference_pilot --split test \
+  --indices 1664 1680 1696 1712 1728 1744 1760 1776 --cgls-iterations 8 \
+  --reference-checkpoint data/lodopab/reference.pt
+```
+
+The command verifies the checkpoint SHA-256 and uses the published Hann
+frequency scaling for each reference method. The benchmark manifest records
+the weights revision, digest, filters and dependency versions. U-Net inference
+runs on CPU and its timing includes its own FBP preprocessing. Use
+`--backend astra_cpu` for CPU-only latency comparisons.

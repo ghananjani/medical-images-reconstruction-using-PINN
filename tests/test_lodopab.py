@@ -116,3 +116,42 @@ def test_patient_bootstrap_weights_each_patient_equally():
     np.testing.assert_allclose(result["mean_delta"], 1)
     np.testing.assert_allclose(result["ci95_low"], -1)
     np.testing.assert_allclose(result["ci95_high"], 3)
+
+
+def test_reference_checkpoint_rejects_unverified_weights(tmp_path):
+    from medreconlab.lodopab_reference import load_reference
+
+    checkpoint = tmp_path / "reference.pt"
+    checkpoint.write_bytes(b"wrong checkpoint")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        load_reference(None, checkpoint)
+
+
+def test_reference_methods_enter_matched_benchmark(tmp_path, monkeypatch):
+    from medreconlab import lodopab_reference
+
+    pytest.importorskip("odl")
+    pytest.importorskip("astra")
+    ray = lodopab.make_ray_transform()
+    reference = np.zeros(lodopab.IMAGE_SHAPE, dtype=np.float32)
+    reference[145:215, 185:240] = 0.5
+    obs = np.asarray(ray(reference))
+    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {"test": [692]})
+    monkeypatch.setattr(lodopab, "load_pair", lambda *_: (obs, reference))
+
+    def reconstruct(measurement):
+        np.testing.assert_array_equal(np.asarray(measurement), obs)
+        return reference * 0.9
+
+    metadata = {"weights_sha256": "test fixture"}
+    monkeypatch.setattr(lodopab_reference, "load_reference", lambda *_: (
+        {"fbp_reference": reconstruct, "fbp_unet_reference": reconstruct}, metadata
+    ))
+    frame = lodopab.benchmark(
+        tmp_path, tmp_path, indices=[0], reference_checkpoint=tmp_path / "reference.pt",
+    )
+    assert frame["method"].tolist() == ["fbp", "fbp_reference", "fbp_unet_reference"]
+    assert (frame["patient_id"] == 692).all()
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["reference_reconstructors"] == metadata
+    assert (tmp_path / "paired_vs_fbp.csv").is_file()
