@@ -41,7 +41,9 @@ Do not present pixel optimization or a learned postprocessor as a PDE-based PINN
    ODL/ASTRA and exports both slice- and patient-weighted summaries.
    Start with full-angle low-dose measurements. Sweep CGLS iteration counts on
    the validation split, maximizing mean PSNR after first averaging within each
-   patient. Freeze the budget before test evaluation. Use paired patient
+   patient. Freeze the budget before test evaluation. Run the full test split with
+   `--frozen-selection` and archive the validation selection and its digest
+   from the held-out manifest. Use paired patient
    bootstrap intervals for comparisons against FBP. For sparse-view runs, record the
    selected angle indices and use a projector matched to exactly those angles.
 3. **Optional second dataset:** AAPM Low Dose CT public image/projection resources,

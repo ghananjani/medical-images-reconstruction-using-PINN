@@ -163,11 +163,15 @@ def test_benchmark_resume_regenerates_full_validation_outputs(tmp_path, monkeypa
     pytest.importorskip("odl")
     pytest.importorskip("astra")
     monkeypatch.setitem(lodopab.SPLIT_SIZES, "validation", 2)
+    monkeypatch.setitem(lodopab.SPLIT_SIZES, "test", 1)
+    monkeypatch.setitem(lodopab.PATIENT_RANGES, "validation", (632, 634))
     ray = lodopab.make_ray_transform()
     image = np.zeros(lodopab.IMAGE_SHAPE, dtype=np.float32)
     image[145:215, 185:240] = 0.5
     observation = np.asarray(ray(image))
-    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {"validation": [632, 633]})
+    monkeypatch.setattr(lodopab, "load_patient_ids", lambda _: {
+        "validation": [632, 633], "test": [692],
+    })
     calls = []
 
     def load_pair(root, split, index):
@@ -191,3 +195,24 @@ def test_benchmark_resume_regenerates_full_validation_outputs(tmp_path, monkeypa
     with pytest.raises(ValueError, match="Checkpoint settings differ"):
         lodopab.benchmark(tmp_path, output, **{**settings, "validation_iterations": [2]})
     assert calls == [0, 1, 1]
+
+    holdout = tmp_path / "heldout"
+    frozen = output / "selection.json"
+    with pytest.raises(ValueError, match="separate output directory"):
+        lodopab.benchmark(tmp_path, output, frozen_selection=frozen)
+    with pytest.raises(ValueError, match="complete test split"):
+        lodopab.benchmark(tmp_path, holdout, split="validation", frozen_selection=frozen)
+    heldout = lodopab.benchmark(tmp_path, holdout, frozen_selection=frozen, resume=True)
+    assert heldout["method"].tolist() == ["fbp", "cgls"]
+    manifest = json.loads((holdout / "manifest.json").read_text())
+    assert manifest["cgls_iterations"] == 1
+    assert manifest["validation_selection"]["record"] == selection
+    assert len(manifest["validation_selection"]["sha256"]) == 64
+
+    for key, value in (("scope", "subset"), ("patient_mapping_sha256", "wrong"),
+                       ("selected_iterations", True), ("backend", "astra_cuda")):
+        invalid = tmp_path / "invalid.json"
+        invalid.write_text(json.dumps({**selection, key: value}))
+        with pytest.raises(ValueError, match="Validation selection"):
+            lodopab.benchmark(tmp_path, tmp_path / "invalid", frozen_selection=invalid)
+    assert calls == [0, 1, 1, 0]

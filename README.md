@@ -290,9 +290,20 @@ The sweep records intermediate reconstructions from a single CGLS solve.
 `selection.json` records the budget with the highest patient-weighted mean
 PSNR, using fewer iterations to break exact ties. Comparative runs export
 `paired_vs_fbp.csv` with mean differences and 95% percentile bootstrap intervals
-over paired patient averages. Use the selected budget with
-`--split test --all --cgls-iterations` for final offline evaluation. This workflow
-covers full-angle low-dose data. Sparse-view experiments require a separate
+over paired patient averages. Use the completed validation selection directly
+for final offline evaluation:
+
+```bash
+medrecon-lodopab --root data/lodopab --output outputs/lodopab_test \
+  --split test --all --frozen-selection outputs/lodopab_validation/selection.json \
+  --reference-checkpoint data/lodopab/reference.pt --resume
+```
+
+The frozen-selection option checks full validation coverage, the patient mapping,
+backend and chosen candidate before reading any test images. The test manifest
+records the selection and its SHA-256 digest. Use the same backend for validation
+and test. Pilot runs can still set a fixed `--cgls-iterations` directly.
+This workflow covers full-angle low-dose data. Sparse-view experiments require a separate
 angular selection protocol and a corresponding forward operator.
 
 ### Published LoDoPaB-CT reference comparators

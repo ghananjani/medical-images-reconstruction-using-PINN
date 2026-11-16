@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from hashlib import sha256
 from importlib.metadata import version
@@ -131,15 +132,52 @@ def _paired_patient_deltas(per_patient: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _patient_mapping_digest(ids: np.ndarray) -> str:
+    return sha256(np.asarray(ids, dtype="<i8").tobytes()).hexdigest()
+
+
+def load_frozen_selection(path: Path, validation_ids: np.ndarray, backend: str) -> dict:
+    """Verify a complete validation selection before evaluating any test images."""
+    raw = path.read_bytes()
+    record = json.loads(raw)
+    first, stop = PATIENT_RANGES["validation"]
+    expected = {
+        "dataset_doi": DATASET_DOI,
+        "split": "validation",
+        "scope": "full_split",
+        "criterion": "psnr_patient_mean",
+        "tie_break": "fewer iterations",
+        "n_slices": SPLIT_SIZES["validation"],
+        "n_patients": stop - first,
+        "backend": backend,
+        "patient_mapping_sha256": _patient_mapping_digest(validation_ids),
+    }
+    if not isinstance(record, dict):
+        raise ValueError("Validation selection must be a JSON object")
+    for field, value in expected.items():
+        if record.get(field) != value:
+            raise ValueError(f"Validation selection has incompatible {field}: expected {value}")
+    chosen, candidates = record.get("selected_iterations"), record.get("candidates")
+    if (
+        type(chosen) is not int or not isinstance(candidates, list) or
+        not all(type(budget) is int and budget > 0 for budget in candidates) or
+        len(set(candidates)) != len(candidates) or chosen not in candidates
+    ):
+        raise ValueError("Validation selection has invalid iteration candidates or winner")
+    score = record.get("selected_score")
+    if type(score) not in (int, float) or not math.isfinite(score):
+        raise ValueError("Validation selection must report a finite selected score")
+    return {"sha256": sha256(raw).hexdigest(), "record": record}
+
+
 def benchmark(root: Path, output: Path, split: str = "test",
               indices: list[int] | None = None, cgls_iterations: int = 0,
               backend: str = "astra_cpu", *,
               validation_iterations: list[int] | None = None,
               reference_checkpoint: Path | None = None,
-              resume: bool = False) -> pd.DataFrame:
+              resume: bool = False,
+              frozen_selection: Path | None = None) -> pd.DataFrame:
     """Compare native FBP and optional zero-initialized CGLS on matched slices."""
-    import odl
-
     if cgls_iterations < 0:
         raise ValueError("CGLS iterations must be nonnegative")
     budgets = sorted(validation_iterations or [])
@@ -154,7 +192,23 @@ def benchmark(root: Path, output: Path, split: str = "test",
         0 <= index < count for index in selected
     ):
         raise ValueError(f"{split} indices must be unique and within [0, {count - 1}]")
-    ids = load_patient_ids(root)[split]
+    if frozen_selection is not None and (
+        split != "test" or len(selected) != count or cgls_iterations or validation_iterations is not None
+    ):
+        raise ValueError("A frozen selection requires the complete test split and no other iteration setting")
+    ids_by_split = load_patient_ids(root)
+    ids = ids_by_split[split]
+    selection_provenance = None
+    if frozen_selection is not None:
+        if frozen_selection.resolve() == (output / "selection.json").resolve():
+            raise ValueError("Use a separate output directory for the held-out run")
+        selection_provenance = load_frozen_selection(
+            frozen_selection, ids_by_split["validation"], backend
+        )
+        cgls_iterations = selection_provenance["record"]["selected_iterations"]
+
+    import odl
+
     ray = make_ray_transform(backend)
     fbp = odl.tomo.fbp_op(ray, filter_type="Ram-Lak", frequency_scaling=1.0)
 
@@ -195,7 +249,9 @@ def benchmark(root: Path, output: Path, split: str = "test",
     manifest["scope"] = "full_split" if complete_split else "subset"
     manifest["n_slices"] = len(selected)
     manifest["n_patients"] = len(set(ids[index] for index in selected))
-    manifest["patient_mapping_sha256"] = sha256(np.asarray(ids, dtype="<i8").tobytes()).hexdigest()
+    manifest["patient_mapping_sha256"] = _patient_mapping_digest(ids)
+    if selection_provenance is not None:
+        manifest["validation_selection"] = selection_provenance
     checkpoint = output / "progress.sqlite"
     if resume:
         output.mkdir(parents=True, exist_ok=True)
@@ -250,10 +306,14 @@ def benchmark(root: Path, output: Path, split: str = "test",
         (output / "selection.json").unlink(missing_ok=True)
     if not (budgets or cgls_iterations or reference_checkpoint is not None):
         (output / "paired_vs_fbp.csv").unlink(missing_ok=True)
+    selection = None
     if budgets:
         criterion = "psnr_patient_mean"
         chosen = max(budgets, key=lambda budget: (summary.loc[f"cgls_{budget}", criterion], -budget))
-        (output / "selection.json").write_text(json.dumps({
+        selection = {
+            "dataset_doi": DATASET_DOI,
+            "backend": backend,
+            "patient_mapping_sha256": manifest["patient_mapping_sha256"],
             "split": split,
             "scope": manifest["scope"],
             "criterion": criterion,
@@ -263,13 +323,17 @@ def benchmark(root: Path, output: Path, split: str = "test",
             "selected_score": float(summary.loc[f"cgls_{chosen}", criterion]),
             "n_slices": len(selected),
             "n_patients": int(summary.loc[f"cgls_{chosen}", "n_patients"]),
-        }, indent=2) + "\n")
+        }
     if budgets or cgls_iterations or reference_checkpoint is not None:
         _paired_patient_deltas(per_patient).to_csv(output / "paired_vs_fbp.csv", index=False)
     frame.to_csv(output / "per_slice.csv", index=False)
     per_patient.to_csv(output / "per_patient.csv")
     summary.to_csv(output / "summary.csv")
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    if selection is not None:
+        temporary = output / "selection.json.tmp"
+        temporary.write_text(json.dumps(selection, indent=2) + "\n")
+        temporary.replace(output / "selection.json")
     return frame
 
 
@@ -287,6 +351,10 @@ def main():
         "--validation-iterations", type=int, nargs="+",
         help="Sweep CGLS budgets on the validation split and select by patient-weighted PSNR",
     )
+    iteration_options.add_argument(
+        "--frozen-selection", type=Path,
+        help="Use a full-validation selection.json for the complete held-out test split",
+    )
     parser.add_argument("--backend", choices=("astra_cpu", "astra_cuda"), default="astra_cpu")
     parser.add_argument(
         "--reference-checkpoint", type=Path,
@@ -300,6 +368,7 @@ def main():
         validation_iterations=args.validation_iterations,
         reference_checkpoint=args.reference_checkpoint,
         resume=args.resume,
+        frozen_selection=args.frozen_selection,
     )
     print(frame.groupby("method")[["psnr", "ssim", "reconstruction_s"]].mean())
 
