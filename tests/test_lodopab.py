@@ -156,6 +156,14 @@ def test_reference_methods_enter_matched_benchmark(tmp_path, monkeypatch):
     manifest = json.loads((tmp_path / "manifest.json").read_text())
     assert manifest["reference_reconstructors"] == metadata
     assert (tmp_path / "paired_vs_fbp.csv").is_file()
+    import pandas as pd
+
+    paired = pd.read_csv(tmp_path / "paired_vs_hann_fbp.csv")
+    assert set(paired["baseline"]) == {"fbp_reference"}
+    assert set(paired["method"]) == {"fbp", "fbp_unet_reference"}
+    unet = paired[paired["method"] == "fbp_unet_reference"]
+    np.testing.assert_allclose(unet["mean_delta"], 0)
+
 
 
 

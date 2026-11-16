@@ -346,5 +346,8 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 medrecon-lodopab \
 The command verifies the checkpoint SHA-256 and uses the published Hann
 frequency scaling for each reference method. The benchmark manifest records
 the weights revision, digest, filters and dependency versions. U-Net inference
-runs on CPU and its timing includes its own FBP preprocessing. Use
+runs on CPU and its timing includes its own FBP preprocessing.
+`paired_vs_hann_fbp.csv` reports paired patient-level differences and intervals
+against the published tuned Hann baseline, alongside the existing
+`paired_vs_fbp.csv` comparisons against full-band Ram-Lak. Use
 `--backend astra_cpu` for CPU-only latency comparisons.

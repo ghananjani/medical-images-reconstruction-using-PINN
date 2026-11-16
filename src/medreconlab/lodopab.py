@@ -166,22 +166,22 @@ def _cgls_trace(ray, measurement, budgets):
     ]
 
 
-def _paired_patient_deltas(per_patient: pd.DataFrame) -> pd.DataFrame:
+def _paired_patient_deltas(per_patient: pd.DataFrame, baseline: str = "fbp") -> pd.DataFrame:
     """Estimate equal-patient mean differences using paired patient resampling."""
     rng = np.random.default_rng(11)
     measurements = ["psnr", "ssim", "relative_l2_residual"]
-    fbp = per_patient.loc["fbp", measurements]
-    draws = rng.integers(len(fbp), size=(2000, len(fbp)))
+    reference = per_patient.loc[baseline, measurements]
+    draws = rng.integers(len(reference), size=(2000, len(reference)))
     rows = []
-    for method in per_patient.index.get_level_values("method").unique().drop("fbp"):
-        differences = per_patient.loc[method, measurements].reindex(fbp.index) - fbp
+    for method in per_patient.index.get_level_values("method").unique().drop(baseline):
+        differences = per_patient.loc[method, measurements].reindex(reference.index) - reference
         for metric in measurements:
             values = differences[metric].to_numpy()
             bounds = (np.nan, np.nan)
             if len(values) > 1 and np.isfinite(values).all():
                 bounds = np.percentile(values[draws].mean(axis=1), [2.5, 97.5])
             rows.append({
-                "method": method, "baseline": "fbp", "metric": metric,
+                "method": method, "baseline": baseline, "metric": metric,
                 "mean_delta": values.mean(), "ci95_low": bounds[0], "ci95_high": bounds[1],
                 "n_patients": len(values),
             })
@@ -388,6 +388,13 @@ def benchmark(root: Path, output: Path, split: str = "test",
         }
     if budgets or cgls_iterations or reference_checkpoint is not None:
         _paired_patient_deltas(per_patient).to_csv(output / "paired_vs_fbp.csv", index=False)
+    reference_deltas_path = output / "paired_vs_hann_fbp.csv"
+    if reference_checkpoint is not None:
+        _paired_patient_deltas(per_patient, baseline="fbp_reference").to_csv(
+            reference_deltas_path, index=False
+        )
+    else:
+        reference_deltas_path.unlink(missing_ok=True)
     frame.to_csv(output / "per_slice.csv", index=False)
     per_patient.to_csv(output / "per_patient.csv")
     summary.to_csv(output / "summary.csv")
