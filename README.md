@@ -250,6 +250,9 @@ validation required for stronger scientific claims.
 
 ## LoDoPaB-CT native-geometry baselines
 
+The [pilot evidence](docs/lodopab_pilot_evidence.md) records the measured
+validation and test subsets, comparator settings, and confidence intervals.
+
 Download the observation and ground-truth ZIP files for your split and all
 three `patient_ids_rand_*.csv` files from [LoDoPaB-CT on Zenodo](https://zenodo.org/records/3384092).
 For the validation split, place the five downloads in `data/lodopab/downloads`
